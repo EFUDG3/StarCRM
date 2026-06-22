@@ -1,0 +1,34 @@
+# Local PostgreSQL for Star CRM development.
+#
+# Brings up the same Postgres the app expects, with credentials that match the
+# local DATABASE_URL in backend/.env.example. Data persists in a named volume
+# across restarts (and survives `docker compose down`; use `down -v` to wipe).
+#
+#   docker compose up -d     # start Postgres in the background
+#   docker compose down      # stop it (keeps data)
+#   docker compose down -v   # stop it and delete the data volume
+#
+# Then set backend/.env:
+#   DATABASE_URL=postgresql+psycopg://star:password@localhost:5432/star_crm
+
+services:
+  db:
+    image: postgres:16
+    container_name: star-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: star
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: star_crm
+    ports:
+      - "5432:5432"
+    volumes:
+      - star_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U star -d star_crm"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  star_pg_data:

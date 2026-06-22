@@ -1,0 +1,12 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+pydantic==2.10.4
+# PostgreSQL driver (psycopg v3). Required — this app runs on Postgres only.
+psycopg[binary]==3.2.13
+# Loads backend/.env on startup so DATABASE_URL is picked up automatically.
+python-dotenv==1.0.1
+# Business-card scan: Claude vision extraction, image downscaling, file uploads.
+anthropic==0.40.0
+pillow==11.0.0
+python-multipart==0.0.20

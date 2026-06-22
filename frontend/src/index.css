@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Always reserve the vertical scrollbar gutter so filtering to a short list
+   (scrollbar disappears) doesn't shift the centered layout sideways. */
+html {
+  scrollbar-gutter: stable;
+  overflow-y: scroll;
+}

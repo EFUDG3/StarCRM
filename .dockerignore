@@ -1,0 +1,13 @@
+# Keep the build context small and avoid shipping local junk into the image.
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.pyc
+frontend/dist
+backend/static
+**/*.db
+.env
+**/.env
+.git
+.gitignore
+*.md
