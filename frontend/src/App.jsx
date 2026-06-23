@@ -60,6 +60,7 @@ export default function StarCRM() {
   const [touchText, setTouchText] = useState("");
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState("");
   const cardInputRef = useRef(null);
 
   const refresh = async () => {
@@ -235,9 +236,16 @@ export default function StarCRM() {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-picking the same file
     if (!file) return;
+    setScanError("");
     setScanning(true);
     try {
       const f = await api.scanCard(file);
+      const gotSomething = ["name", "company", "role", "email", "phone"]
+        .some((k) => (f[k] || "").trim());
+      if (!gotSomething) {
+        setScanError("Couldn't read any details off that card. Try a sharper, well-lit photo, or add the contact manually.");
+        return;
+      }
       setSelectedId(null);
       setEditing({
         ...blank,
@@ -249,7 +257,12 @@ export default function StarCRM() {
         cardImage: f.cardImage || null,
       });
     } catch (err) {
-      window.alert("Couldn't read that card. " + (err.message || ""));
+      const msg =
+        err.status === 503 ? "Card scanning isn't configured yet (missing API key). Add the contact manually for now."
+          : err.message === "timeout" ? "The scan took too long — the service may be busy. Try again in a moment."
+          : (err.status === 502 || err.status === 529 || err.status === 429) ? "The scanning service is busy right now. Give it a few seconds and try again."
+          : "Couldn't read that card. Try again, or add the contact manually.";
+      setScanError(msg);
     } finally {
       setScanning(false);
     }
@@ -319,16 +332,24 @@ export default function StarCRM() {
           </div>
         </header>
 
+        {/* Scan error banner */}
+        {scanError && (
+          <div className="mb-4 rounded p-3 text-sm flex items-start justify-between gap-3" style={{ background: "#FBEAE8", color: TIDE, border: `1px solid ${TIDE}` }}>
+            <span>{scanError}</span>
+            <button onClick={() => setScanError("")} className="shrink-0" title="Dismiss"><X size={16} /></button>
+          </div>
+        )}
+
         {/* Up next rail */}
         {dueSoon.length > 0 && !selected && !editing && (
           <section className="mb-6">
             <div className="font-mono text-lg font-bold tracking-[0.2em] uppercase mb-3" style={{ color: SEA }}>Up next</div>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {dueSoon.map((c) => (
                 <button
                   key={c.id}
                   onClick={() => setSelectedId(c.id)}
-                  className="text-left bg-white rounded p-3 flex items-start gap-3 border-l-4 hover:shadow-sm transition-shadow"
+                  className="text-left bg-white rounded p-3 flex items-start gap-3 border-l-4 hover:shadow-sm transition-shadow min-w-0"
                   style={{ borderColor: c.overdue || c.today ? TIDE : SAND }}
                 >
                   <Clock size={20} className="mt-0.5 shrink-0" style={{ color: c.overdue || c.today ? TIDE : SEA }} />

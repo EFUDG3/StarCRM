@@ -59,21 +59,38 @@ export const resetData = () => request("/api/reset", { method: "POST" });
 
 // Upload a business-card photo; returns { name, company, role, email, phone,
 // cardImage } where cardImage is a compact JPEG data URL to save with the contact.
-export const scanCard = async (file) => {
+export const scanCard = async (file, timeoutMs = 30000) => {
   const fd = new FormData();
   fd.append("file", file);
   const uid = getCurrentUser();
-  // No Content-Type header — the browser sets the multipart boundary itself.
-  const res = await fetch(`${BASE}/api/contacts/scan-card`, {
-    method: "POST",
-    headers: uid ? { "X-User-Id": uid } : {},
-    body: fd,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text || res.statusText}`);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    // No Content-Type header — the browser sets the multipart boundary itself.
+    const res = await fetch(`${BASE}/api/contacts/scan-card`, {
+      method: "POST",
+      headers: uid ? { "X-User-Id": uid } : {},
+      body: fd,
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      let detail = "";
+      try { detail = (await res.json())?.detail || ""; } catch { /* ignore */ }
+      const err = new Error(detail || `API ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return await res.json();
+  } catch (e) {
+    if (e.name === "AbortError") {
+      const err = new Error("timeout");
+      err.status = 0;
+      throw err;
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json();
 };
 
 // Fetch a stored card image (needs the user header, so we can't use a plain
