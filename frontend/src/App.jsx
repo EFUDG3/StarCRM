@@ -89,6 +89,29 @@ export default function StarCRM() {
     })();
   }, []);
 
+  // Back button: when the add/edit form or a contact's detail is open, the
+  // browser/phone Back button closes it and returns to the list instead of
+  // leaving the app. We push a history entry while an overlay is open and pop
+  // it on Back; if the overlay is closed via the UI instead, we consume the
+  // entry so Back doesn't leave a dead press behind.
+  const overlayOpen = editing !== null || selectedId !== null;
+  const closedByBack = useRef(false);
+  useEffect(() => {
+    if (!overlayOpen) return;
+    window.history.pushState({ starcrmOverlay: true }, "");
+    const onPop = () => {
+      closedByBack.current = true;
+      setEditing(null);
+      setSelectedId(null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      if (!closedByBack.current) window.history.back();
+      closedByBack.current = false;
+    };
+  }, [overlayOpen]);
+
   const reloadUsers = async () => {
     const us = await api.listUsers();
     setUsers(us);
@@ -245,8 +268,8 @@ export default function StarCRM() {
       <div className="max-w-5xl mx-auto px-4 py-6">
 
         {/* Header */}
-        <header className="flex items-end justify-between mb-6 border-b-2 pb-4" style={{ borderColor: INK }}>
-          <div className="flex items-end gap-4">
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-6 border-b-2 pb-4" style={{ borderColor: INK }}>
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:gap-4">
             <div>
               <div className="font-mono text-xs tracking-[0.25em] uppercase mb-1" style={{ color: SEA }}>Relationship board</div>
               <h1 className="text-3xl font-bold tracking-tight" style={{ fontFamily: "Georgia, serif" }}>
@@ -262,7 +285,7 @@ export default function StarCRM() {
               onDelete={removeUser}
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center flex-wrap gap-2">
             <span className="font-mono text-xs" style={{ color: saveState === "error" ? TIDE : SEA }}>
               {saveState === "saving" ? "saving…" : saveState === "saved" ? "saved ✓" : saveState === "error" ? "save failed" : ""}
             </span>
