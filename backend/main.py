@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.orm import Session
 
+import auth
 import cards
 import models  # noqa: F401 (ensures models are registered on Base)
 from database import Base, engine, get_db
@@ -47,6 +48,10 @@ def _ensure_schema() -> None:
         conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS card_image BYTEA"))
         conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS card_image_type VARCHAR"))
         conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS category_label VARCHAR"))
+        # Entra identity columns on users (additive; safe on existing data).
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS microsoft_oid VARCHAR"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_microsoft_oid ON users (microsoft_oid)"))
 
 
 _ensure_schema()
@@ -142,15 +147,23 @@ def load_seed(db: Session, user: User) -> None:
 
 
 def get_current_user(
-    x_user_id: str = Header(..., alias="X-User-Id"),
+    authorization: str | None = Header(default=None),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     db: Session = Depends(get_db),
 ) -> User:
-    """Resolve the active profile from the X-User-Id header. No auth — the
-    client simply tells us which user is selected."""
-    user = db.get(User, x_user_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+    """Resolve the active user. Prefers an Entra Bearer token (web SSO / the
+    Claude connector) when Entra is configured; otherwise falls back to the
+    X-User-Id profile header (the current no-auth model), so nothing breaks
+    while auth is being rolled out."""
+    if auth.ENTRA_ENABLED and authorization and authorization.lower().startswith("bearer "):
+        claims = auth.validate_entra_token(authorization.split(" ", 1)[1])
+        return auth.user_from_claims(claims, db)
+    if x_user_id:
+        user = db.get(User, x_user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        return user
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
 
 def _get_or_404(db: Session, user: User, contact_id: str) -> Contact:
@@ -386,6 +399,17 @@ def get_card(
         content=contact.card_image,
         media_type=contact.card_image_type or "image/jpeg",
     )
+
+
+# --- Claude connector: mount the MCP server at /mcp (when configured) -------
+# Registered before the SPA catch-all so its routes aren't intercepted. Guarded
+# so a missing MCP SDK or unconfigured Entra never takes down the main API.
+try:
+    import mcp_server
+    app.mount("/mcp", mcp_server.build_mcp_app())
+except Exception as _mcp_err:
+    import logging
+    logging.getLogger("uvicorn.error").info("MCP connector not mounted: %s", _mcp_err)
 
 
 # --- Serve the built frontend (single-service deploy) -----------------------

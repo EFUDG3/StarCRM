@@ -34,6 +34,9 @@ class User(Base):
 
     id = Column(String, primary_key=True, default=_user_id)
     name = Column(String, nullable=False)
+    # Set once the profile is linked to a Microsoft Entra (M365) identity.
+    microsoft_oid = Column(String, nullable=True, unique=True, index=True)
+    email = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     contacts = relationship(

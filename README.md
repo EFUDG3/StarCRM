@@ -1,9 +1,8 @@
 # Star CRM — Proof of Concept
 
-A standalone, self-hosted version of the relationship board Bob built. The React
+A standalone, self-hosted version of the relationship board. The React
 frontend reads and writes to a real backend (FastAPI + PostgreSQL) instead of
-in-browser storage, so contacts and activity persist in a database and the app
-runs outside of Claude.
+in-browser storage, so contacts and activity persist in a database (NEON)
 
 The database is **PostgreSQL only**. The deploy target is **Google Cloud Run**
 (one service serving both the API and the built site) with a managed
@@ -199,6 +198,37 @@ identifying the active profile, and operate only on that profile's data. The
 | POST | `/api/contacts/scan-card` | Upload a card photo (multipart `file`); returns prefill fields + a compact image to save |
 | GET | `/api/contacts/{id}/card` | The stored card image (404 if none) |
 | POST | `/api/reset` | Restore the demo set for the active user only |
+
+## Claude connector (MCP) + Entra auth — in progress
+
+Lets Claude read and write contacts on a user's own board ("add Jane Doe, GC at
+Acme…"). It's a remote MCP server scoped to the authenticated Microsoft Entra
+(M365) user.
+
+What's scaffolded and tested:
+
+- `auth.py` validates Entra Bearer tokens (signature/issuer/audience/expiry) and
+  maps each identity to a profile, auto-creating one on first sign-in. Inactive
+  unless `ENTRA_TENANT_ID` + `ENTRA_CLIENT_ID` are set — until then the app uses
+  the `X-User-Id` header as before.
+- `get_current_user` accepts an Entra Bearer token when configured, else falls
+  back to the header, so the live app keeps working during rollout.
+- `mcp_server.py` exposes `search_contacts`, `get_contact`, `create_contact`,
+  `update_contact`, `delete_contact`, `log_touch`, scoped per user. Mounted at
+  `/mcp` (guarded — a missing SDK or unconfigured Entra won't break the API).
+- `users` table gains `microsoft_oid` + `email` (additive migration on startup).
+
+To finish (needs the M365 tenant):
+
+1. Register an Entra app (Directory/tenant ID, client ID, client secret, the
+   App ID URI for the token audience). Set `ENTRA_TENANT_ID` / `ENTRA_CLIENT_ID`
+   (and `ENTRA_AUDIENCE` if it's the `api://<client-id>` form).
+2. Register a second Entra app (or reuse) for the Claude connector; its redirect
+   URI is the callback Claude shows when adding the connector.
+3. Finalize the MCP OAuth resource metadata in `build_mcp_app()` against the
+   deployed `/mcp` URL, deploy, then in Claude (Team plan): **Org settings →
+   Connectors → Add custom → Web**, enter the MCP URL + connector client
+   ID/secret; members connect individually and sign in with M365.
 
 ## Security note (read before hosting publicly)
 
