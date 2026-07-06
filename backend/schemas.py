@@ -33,3 +33,21 @@ class LogIn(BaseModel):
 
 class UserIn(BaseModel):
     name: str
+
+
+class ChatIn(BaseModel):
+    """One starbot chat turn. `messages` is the full Anthropic-format history
+    (the client stores what the previous turn's `done` event returned, plus the
+    new user message) — the server holds no chat state between turns."""
+    messages: list
+
+
+class TodoIn(BaseModel):
+    text: str
+    due: str = ""          # ISO date string, may be empty
+    source: str = ""       # origin label, e.g. 'Email: "RE: invoice" — Bob'
+    source_link: str = ""  # webLink to the originating email/event/file
+
+
+class TodoPatch(BaseModel):
+    done: bool

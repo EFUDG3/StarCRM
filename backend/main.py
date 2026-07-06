@@ -16,17 +16,19 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.orm import Session
 
 import auth
 import cards
+import chat
+import m365
 import models  # noqa: F401 (ensures models are registered on Base)
 from database import Base, engine, get_db
 from models import Contact, Interaction, User
-from schemas import ContactIn, LogIn, UserIn
+from schemas import ChatIn, ContactIn, LogIn, TodoIn, TodoPatch, UserIn
 from seed import SEED_CONTACTS
 
 
@@ -53,6 +55,8 @@ def _ensure_schema() -> None:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS microsoft_oid VARCHAR"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_microsoft_oid ON users (microsoft_oid)"))
+        # Starbot chat: per-user MSAL (Graph) token cache. Additive.
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS m365_token_cache TEXT"))
 
 
 _ensure_schema()
@@ -225,6 +229,78 @@ def _seed_on_first_run() -> None:
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+# --- Starbot: M365 sign-in, chat, to-dos ------------------------------------
+# These routes use the M365 session cookie (m365.get_session_user), NOT the
+# X-User-Id header — the chat needs Graph tokens, which hang off the Microsoft
+# identity. The CRM board's existing routes are unchanged.
+app.include_router(m365.router)
+
+
+@app.post("/api/chat")
+def chat_endpoint(
+    payload: ChatIn,
+    user: User = Depends(m365.get_session_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Run one starbot chat turn, streamed as Server-Sent Events. The Graph
+    token is minted here (request-scoped session persists any cache refresh);
+    the generator then runs on its own DB session while streaming."""
+    if not payload.messages:
+        raise HTTPException(status_code=400, detail="messages is required")
+    graph_token = m365.get_graph_token(user, db)
+    return StreamingResponse(
+        chat.stream_chat(payload.messages, user.id, graph_token),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/todos")
+def list_todos(
+    include_done: bool = False,
+    user: User = Depends(m365.get_session_user),
+    db: Session = Depends(get_db),
+) -> list:
+    return chat.op_list_todos(db, user, include_done=include_done)
+
+
+@app.post("/api/todos", status_code=201)
+def create_todo(
+    payload: TodoIn,
+    user: User = Depends(m365.get_session_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if not payload.text.strip():
+        raise HTTPException(status_code=400, detail="text is required")
+    created = chat.op_add_todos(db, user, [payload.model_dump()])
+    return created[0]
+
+
+@app.patch("/api/todos/{todo_id}")
+def patch_todo(
+    todo_id: str,
+    payload: TodoPatch,
+    user: User = Depends(m365.get_session_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        return chat.op_set_todo_done(db, user, todo_id, done=payload.done)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="To-do not found")
+
+
+@app.delete("/api/todos/{todo_id}", status_code=204)
+def remove_todo(
+    todo_id: str,
+    user: User = Depends(m365.get_session_user),
+    db: Session = Depends(get_db),
+) -> None:
+    try:
+        chat.op_delete_todo(db, user, todo_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="To-do not found")
 
 
 # --- Users (no auth — just selectable profiles) ----------------------------

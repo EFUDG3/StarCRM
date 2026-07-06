@@ -103,3 +103,73 @@ export const fetchCardBlobUrl = async (id) => {
   if (!res.ok) return null;
   return URL.createObjectURL(await res.blob());
 };
+
+// --- Starbot (M365 session cookie, not X-User-Id) ---------------------------
+// These endpoints authenticate with the httpOnly session cookie set by the
+// Microsoft sign-in redirect, so every call needs credentials: "include".
+const sessionRequest = async (path, options = {}) => {
+  const res = await fetch(`${BASE}${path}`, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json())?.detail || ""; } catch { /* ignore */ }
+    const err = new Error(detail || `API ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return null;
+  return res.json();
+};
+
+export const authMe = () => sessionRequest("/api/auth/me");
+export const authLogout = () => sessionRequest("/api/auth/logout", { method: "POST" });
+// Sign-in is a full-page redirect (Microsoft login), not an XHR.
+export const authLoginUrl = () => `${BASE}/api/auth/login`;
+
+export const listTodos = () => sessionRequest("/api/todos");
+export const addTodo = (text, due = "") =>
+  sessionRequest("/api/todos", { method: "POST", body: JSON.stringify({ text, due }) });
+export const setTodoDone = (id, done) =>
+  sessionRequest(`/api/todos/${id}`, { method: "PATCH", body: JSON.stringify({ done }) });
+export const deleteTodo = (id) =>
+  sessionRequest(`/api/todos/${id}`, { method: "DELETE" });
+
+// One starbot chat turn over SSE. `messages` is the opaque history array the
+// previous turn's `done` event returned (plus the new user message — the
+// caller appends it). Calls `onEvent` for each parsed event:
+//   {type:"text", text} {type:"tool", name} {type:"todos_changed"}
+//   {type:"done", messages} {type:"error", message}
+export const chatStream = async (messages, onEvent, signal) => {
+  const res = await fetch(`${BASE}/api/chat`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages }),
+    signal,
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json())?.detail || ""; } catch { /* ignore */ }
+    const err = new Error(detail || `API ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop(); // last piece may be incomplete
+    for (const part of parts) {
+      const line = part.split("\n").find((l) => l.startsWith("data: "));
+      if (!line) continue;
+      try { onEvent(JSON.parse(line.slice(6))); } catch { /* skip bad frame */ }
+    }
+  }
+};

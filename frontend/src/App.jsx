@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Search, Phone, Mail, X, Check, Clock, Pencil, Trash2, ChevronLeft, RotateCcw,
-  UserCircle, ChevronDown, UserPlus, Camera,
+  UserCircle, ChevronDown, UserPlus, Camera, Sparkles, LayoutGrid,
 } from "lucide-react";
 import * as api from "./api.js";
+import StarbotChat from "./Chat.jsx";
 
 // ---------- Brand tokens ----------
 // Star brand: red #922525, black, white, with warm supporting neutrals.
@@ -50,6 +51,11 @@ const blank = {
 };
 
 export default function StarCRM() {
+  // Top-level tab: the CRM board or the starbot chat. "#starbot" deep-links to
+  // the chat (also where the M365 sign-in redirect lands).
+  const [view, setView] = useState(() =>
+    window.location.hash === "#starbot" ? "chat" : "board"
+  );
   const [contacts, setContacts] = useState(null); // null = loading
   const [users, setUsers] = useState([]);
   const [userId, setUserId] = useState(null);
@@ -268,7 +274,14 @@ export default function StarCRM() {
     }
   };
 
-  if (!contacts) {
+  const switchView = (v) => {
+    setView(v);
+    // Keep the hash in sync (deep link + where the sign-in redirect lands)
+    // without pushing history entries that would fight the Back-button logic.
+    window.history.replaceState(null, "", v === "chat" ? "#starbot" : window.location.pathname);
+  };
+
+  if (!contacts && view === "board") {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: MIST }}>
         <div className="font-mono text-sm tracking-widest uppercase" style={{ color: SEA }}>Loading the board…</div>
@@ -284,20 +297,41 @@ export default function StarCRM() {
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-6 border-b-2 pb-4" style={{ borderColor: INK }}>
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:gap-4">
             <div>
-              <div className="font-mono text-xs tracking-[0.25em] uppercase mb-1" style={{ color: SEA }}>Relationship board</div>
+              <div className="font-mono text-xs tracking-[0.25em] uppercase mb-1" style={{ color: SEA }}>
+                {view === "chat" ? "AI assistant" : "Relationship board"}
+              </div>
               <h1 className="text-3xl font-bold tracking-tight" style={{ fontFamily: "Georgia, serif" }}>
-                <span style={{ color: SEA }}>★</span> Star CRM
+                <span style={{ color: SEA }}>★</span> {view === "chat" ? "starbot" : "Star CRM"}
               </h1>
             </div>
-            <UserSwitcher
-              users={users}
-              userId={userId}
-              onSwitch={switchUser}
-              onAdd={addUser}
-              onRename={renameUser}
-              onDelete={removeUser}
-            />
+            <div className="flex rounded overflow-hidden" style={{ border: "1px solid #cdd6d4" }}>
+              <button
+                onClick={() => switchView("chat")}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium"
+                style={view === "chat" ? { background: INK, color: "white" } : { background: "white", color: INK }}
+              >
+                <Sparkles size={14} /> Starbot
+              </button>
+              <button
+                onClick={() => switchView("board")}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium"
+                style={view === "board" ? { background: INK, color: "white" } : { background: "white", color: INK }}
+              >
+                <LayoutGrid size={14} /> Board
+              </button>
+            </div>
+            {view === "board" && (
+              <UserSwitcher
+                users={users}
+                userId={userId}
+                onSwitch={switchUser}
+                onAdd={addUser}
+                onRename={renameUser}
+                onDelete={removeUser}
+              />
+            )}
           </div>
+          {view === "board" && (
           <div className="flex items-center flex-wrap gap-2">
             <span className="font-mono text-xs" style={{ color: saveState === "error" ? TIDE : SEA }}>
               {saveState === "saving" ? "saving…" : saveState === "saved" ? "saved ✓" : saveState === "error" ? "save failed" : ""}
@@ -330,8 +364,13 @@ export default function StarCRM() {
               <Plus size={16} /> Add contact
             </button>
           </div>
+          )}
         </header>
 
+        {/* Starbot chat tab */}
+        {view === "chat" && <StarbotChat />}
+
+        {view === "board" && <>
         {/* Scan error banner */}
         {scanError && (
           <div className="mb-4 rounded p-3 text-sm flex items-start justify-between gap-3" style={{ background: "#FBEAE8", color: TIDE, border: `1px solid ${TIDE}` }}>
@@ -495,6 +534,7 @@ export default function StarCRM() {
             </ul>
           </>
         )}
+        </>}
       </div>
     </div>
   );

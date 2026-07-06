@@ -8,3 +8,36 @@ html {
   scrollbar-gutter: stable;
   overflow-y: scroll;
 }
+
+/* Starbot chat: readable markdown inside assistant bubbles (Tailwind preflight
+   strips list/paragraph styling, so restore just what chat answers need). */
+.starbot-md > *:first-child { margin-top: 0; }
+.starbot-md > *:last-child { margin-bottom: 0; }
+.starbot-md p { margin: 0.5rem 0; line-height: 1.55; }
+.starbot-md ul, .starbot-md ol { margin: 0.5rem 0; padding-left: 1.25rem; }
+.starbot-md ul { list-style: disc; }
+.starbot-md ol { list-style: decimal; }
+.starbot-md li { margin: 0.25rem 0; line-height: 1.5; }
+.starbot-md h1, .starbot-md h2, .starbot-md h3, .starbot-md h4 {
+  font-weight: 700; margin: 0.9rem 0 0.35rem;
+}
+.starbot-md h1 { font-size: 1.05rem; }
+.starbot-md h2 { font-size: 1rem; }
+.starbot-md h3, .starbot-md h4 { font-size: 0.9rem; }
+.starbot-md code {
+  background: #ffffff; border: 1px solid #e5e0d8; border-radius: 3px;
+  padding: 0.05rem 0.3rem; font-size: 0.8em;
+}
+.starbot-md pre {
+  background: #ffffff; border: 1px solid #e5e0d8; border-radius: 6px;
+  padding: 0.6rem 0.75rem; margin: 0.5rem 0; overflow-x: auto;
+}
+.starbot-md pre code { background: none; border: none; padding: 0; }
+.starbot-md blockquote {
+  border-left: 3px solid #C8B89A; padding-left: 0.75rem; margin: 0.5rem 0;
+  color: #4a5a60;
+}
+.starbot-md table { border-collapse: collapse; margin: 0.5rem 0; font-size: 0.85em; display: block; overflow-x: auto; }
+.starbot-md th, .starbot-md td { border: 1px solid #e5e0d8; padding: 0.3rem 0.55rem; text-align: left; }
+.starbot-md th { background: #ffffff; font-weight: 600; }
+.starbot-md hr { border: none; border-top: 1px solid #e5e0d8; margin: 0.75rem 0; }
