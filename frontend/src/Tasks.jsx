@@ -46,19 +46,31 @@ export default function TaskBoard() {
     if (me?.signedIn) refresh();
   }, [me?.signedIn]);
 
+  // Optimistic updates: flip the UI immediately, then reconcile that one card
+  // from the PATCH response. No full refetch on success — a refetch here caused
+  // a visible settle/flicker a beat after every click and re-sorted cards
+  // underneath the cursor.
+  const patchLocal = (saved) =>
+    setTodos((cur) => cur.map((x) => (x.id === saved.id ? saved : x)));
+
   const move = async (t, status) => {
-    if (t.status === status) return;
-    // Optimistic move so drag feels instant; refresh reconciles.
+    if (!status || t.status === status) return;
     setTodos((cur) => cur.map((x) => (x.id === t.id ? { ...x, status } : x)));
-    await api.updateTodo(t.id, { status }).catch(() => {});
-    refresh();
+    try {
+      patchLocal(await api.updateTodo(t.id, { status }));
+    } catch {
+      refresh(); // server said no — fall back to truth
+    }
   };
 
   const cyclePriority = async (t) => {
     const priority = PRIORITY_CYCLE[t.priority || ""];
     setTodos((cur) => cur.map((x) => (x.id === t.id ? { ...x, priority } : x)));
-    await api.updateTodo(t.id, { priority }).catch(() => {});
-    refresh();
+    try {
+      patchLocal(await api.updateTodo(t.id, { priority }));
+    } catch {
+      refresh();
+    }
   };
 
   const addTask = async () => {
@@ -167,7 +179,17 @@ export default function TaskBoard() {
                   <li
                     key={t.id}
                     draggable
-                    onDragStart={() => setDragId(t.id)}
+                    onDragStart={(e) => {
+                      // A firm press on a button/link often moves the pointer a
+                      // pixel, which starts a DRAG and swallows the CLICK (felt
+                      // as "priority didn't change until I clicked again").
+                      // Drags may only begin from the card body.
+                      if (e.target.closest("button, a")) {
+                        e.preventDefault();
+                        return;
+                      }
+                      setDragId(t.id);
+                    }}
                     onDragEnd={() => setDragId(null)}
                     className="group rounded p-3 border-l-4 cursor-grab active:cursor-grabbing"
                     style={{
