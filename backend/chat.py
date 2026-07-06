@@ -24,6 +24,14 @@ from models import Todo, User
 CHAT_MODEL = os.getenv("CHAT_MODEL", "claude-sonnet-4-6")
 MAX_TOOL_ROUNDS = 10
 _MAX_TOKENS = 4096
+# Cost/rate-limit guardrails. Full email bodies are the token firehose: cap how
+# much of each body enters the context and how many full reads one round may do
+# (each read lands in the NEXT request's input, which is what trips ITPM).
+_READ_EMAIL_MAX_CHARS = 4000
+_MAX_FULL_READS_PER_ROUND = 3
+# Cap resent history. Old turns compound into every request's input; trim at a
+# safe boundary (a plain-text user turn) so tool_use/tool_result pairs stay intact.
+_MAX_HISTORY_MESSAGES = 30
 
 _client: anthropic.Anthropic | None = None
 
@@ -260,6 +268,10 @@ invent a link or a fact you didn't read from a tool result.
 list_recent_emails (and the calendar when relevant), propose clear action items with due \
 dates when the email implies one, and add them with add_todos including source + \
 source_link. Skip anything already on the list; say so briefly.
+- BE FRUGAL WITH FULL EMAIL READS. The preview from list/search results is usually enough \
+to triage or extract a to-do. Call read_email only when the decision truly needs the body \
+(e.g. drafting a reply, a specific detail the user asked for), at most 2-3 per request, \
+prioritized. Never read every email in a list.
 - Inbox triage ("organize/triage my inbox"): group into **Action needed**, **Waiting / \
 follow-up**, **FYI — no action**, and **Junk / can ignore**, newest first, each item as \
 '[subject](webLink) — sender, date: one-line why'. Recommend, don't nag.
@@ -286,7 +298,7 @@ def _run_tool(name: str, args: dict, user: User, db: Session, token: str):
             unread_only=bool(args.get("unread_only")),
         )
     if name == "read_email":
-        return graph.get_message(token, args["message_id"])
+        return graph.get_message(token, args["message_id"], max_chars=_READ_EMAIL_MAX_CHARS)
     if name == "list_calendar_events":
         return graph.list_calendar_events(token, args["start"], args["end"])
     if name == "search_files":
@@ -309,6 +321,36 @@ def _run_tool(name: str, args: dict, user: User, db: Session, token: str):
 # --- The SSE agent loop ------------------------------------------------------
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
+
+
+def _trim_history(messages: list[dict]) -> list[dict]:
+    """Drop the oldest turns once history gets long. Cut only at a plain-text
+    user turn so an assistant tool_use never loses its matching tool_result."""
+    if len(messages) <= _MAX_HISTORY_MESSAGES:
+        return messages
+    for i in range(len(messages) - _MAX_HISTORY_MESSAGES, len(messages)):
+        if messages[i].get("role") == "user" and isinstance(messages[i].get("content"), str):
+            return messages[i:]
+    return messages  # no safe cut point found — keep everything
+
+
+def _apply_cache_breakpoints(messages: list[dict]) -> None:
+    """Prompt caching: mark the last content block of the final message so the
+    whole prefix (tools + system + history) bills as a cache read on the next
+    round/turn. Cached tokens also don't count toward the per-minute input
+    rate limit, so this is the rate-limit fix as much as the cost fix. Old
+    markers are stripped first (max 4 breakpoints per request)."""
+    for m in messages:
+        if isinstance(m.get("content"), list):
+            for block in m["content"]:
+                if isinstance(block, dict):
+                    block.pop("cache_control", None)
+    last = messages[-1]
+    if isinstance(last.get("content"), str):
+        last["content"] = [{"type": "text", "text": last["content"]}]
+    blocks = last.get("content")
+    if isinstance(blocks, list) and blocks and isinstance(blocks[-1], dict):
+        blocks[-1]["cache_control"] = {"type": "ephemeral"}
 
 
 def _clean_blocks(content) -> list[dict]:
@@ -339,8 +381,17 @@ def stream_chat(messages: list[dict], user_id: str, graph_token: str):
             yield _sse({"type": "error", "message": "Session user no longer exists"})
             return
         client = _anthropic()
-        system = _system_prompt(user)
+        # cache_control on the system block caches tools + system together
+        # (tools render first); the per-request breakpoint below extends the
+        # cached prefix over the conversation as it grows.
+        system = [{
+            "type": "text",
+            "text": _system_prompt(user),
+            "cache_control": {"type": "ephemeral"},
+        }]
+        messages[:] = _trim_history(messages)
         for _round in range(MAX_TOOL_ROUNDS):
+            _apply_cache_breakpoints(messages)
             with client.messages.stream(
                 model=CHAT_MODEL,
                 max_tokens=_MAX_TOKENS,
@@ -357,9 +408,25 @@ def stream_chat(messages: list[dict], user_id: str, graph_token: str):
                 break
 
             results = []
+            full_reads = 0
             for block in final.content:
                 if block.type != "tool_use":
                     continue
+                # Guardrail: a burst of full-body reads is what blows past the
+                # per-minute input limit (every body lands in the next request).
+                if block.name == "read_email":
+                    full_reads += 1
+                    if full_reads > _MAX_FULL_READS_PER_ROUND:
+                        results.append({
+                            "type": "tool_result", "tool_use_id": block.id,
+                            "content": (
+                                f"Skipped: max {_MAX_FULL_READS_PER_ROUND} full email reads "
+                                "per step. Work from the previews, or read the most "
+                                "important remaining email in your next step."
+                            ),
+                            "is_error": True,
+                        })
+                        continue
                 yield _sse({"type": "tool", "name": block.name})
                 try:
                     output = _run_tool(block.name, block.input or {}, user, db, graph_token)
@@ -385,6 +452,17 @@ def stream_chat(messages: list[dict], user_id: str, graph_token: str):
             yield _sse({"type": "text", "text": "\n\n*(Stopped after too many tool steps — ask me to continue.)*"})
 
         yield _sse({"type": "done", "messages": messages})
+    except anthropic.RateLimitError as e:
+        retry_after = ""
+        try:
+            retry_after = e.response.headers.get("retry-after", "")
+        except Exception:
+            pass
+        wait = f"about {retry_after} seconds" if retry_after else "a minute"
+        yield _sse({"type": "error", "message": (
+            f"Hit the Anthropic rate limit — wait {wait} and try again. "
+            "Shorter questions and fewer full-email reads help."
+        )})
     except Exception as e:
         yield _sse({"type": "error", "message": str(e)})
     finally:
