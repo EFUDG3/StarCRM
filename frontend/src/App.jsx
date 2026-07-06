@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Search, Phone, Mail, X, Check, Clock, Pencil, Trash2, ChevronLeft, RotateCcw,
-  UserCircle, ChevronDown, UserPlus, Camera, Sparkles, LayoutGrid,
+  UserCircle, ChevronDown, UserPlus, Camera, Sparkles, LayoutGrid, ListTodo,
 } from "lucide-react";
 import * as api from "./api.js";
 import StarbotChat from "./Chat.jsx";
+import TaskBoard from "./Tasks.jsx";
 
 // ---------- Brand tokens ----------
 // Star brand: red #922525, black, white, with warm supporting neutrals.
@@ -51,10 +52,12 @@ const blank = {
 };
 
 export default function StarCRM() {
-  // Top-level tab: the CRM board or the starbot chat. "#starbot" deep-links to
-  // the chat (also where the M365 sign-in redirect lands).
+  // Top-level tab: starbot chat, task board, or the CRM board. "#starbot" and
+  // "#tasks" deep-link (the M365 sign-in redirect lands on #starbot).
   const [view, setView] = useState(() =>
-    window.location.hash === "#starbot" ? "chat" : "board"
+    window.location.hash === "#starbot" ? "chat"
+      : window.location.hash === "#tasks" ? "tasks"
+      : "board"
   );
   const [contacts, setContacts] = useState(null); // null = loading
   const [users, setUsers] = useState([]);
@@ -215,7 +218,9 @@ export default function StarCRM() {
   const saveEdit = async (form) => {
     if (!form.name.trim()) return;
     const isNew = !form.id;
-    await mutate(() => (isNew ? api.createContact(form) : api.updateContact(form.id, form)));
+    // cardImage is a client-side preview from the scanner only — never persisted.
+    const { cardImage, ...payload } = form;
+    await mutate(() => (isNew ? api.createContact(payload) : api.updateContact(form.id, payload)));
     setEditing(null);
     if (isNew) setSelectedId(null);
   };
@@ -278,7 +283,8 @@ export default function StarCRM() {
     setView(v);
     // Keep the hash in sync (deep link + where the sign-in redirect lands)
     // without pushing history entries that would fight the Back-button logic.
-    window.history.replaceState(null, "", v === "chat" ? "#starbot" : window.location.pathname);
+    const hash = v === "chat" ? "#starbot" : v === "tasks" ? "#tasks" : window.location.pathname;
+    window.history.replaceState(null, "", hash);
   };
 
   if (!contacts && view === "board") {
@@ -298,10 +304,10 @@ export default function StarCRM() {
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:gap-4">
             <div>
               <div className="font-mono text-xs tracking-[0.25em] uppercase mb-1" style={{ color: SEA }}>
-                {view === "chat" ? "AI assistant" : "Relationship board"}
+                {view === "chat" ? "AI assistant" : view === "tasks" ? "Task board" : "Relationship board"}
               </div>
               <h1 className="text-3xl font-bold tracking-tight" style={{ fontFamily: "Georgia, serif" }}>
-                <span style={{ color: SEA }}>★</span> {view === "chat" ? "starbot" : "Star CRM"}
+                <span style={{ color: SEA }}>★</span> {view === "chat" ? "starbot" : view === "tasks" ? "Star Tasks" : "Star CRM"}
               </h1>
             </div>
             <div className="flex rounded overflow-hidden" style={{ border: "1px solid #cdd6d4" }}>
@@ -311,6 +317,13 @@ export default function StarCRM() {
                 style={view === "chat" ? { background: INK, color: "white" } : { background: "white", color: INK }}
               >
                 <Sparkles size={14} /> Starbot
+              </button>
+              <button
+                onClick={() => switchView("tasks")}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium"
+                style={view === "tasks" ? { background: INK, color: "white" } : { background: "white", color: INK }}
+              >
+                <ListTodo size={14} /> Tasks
               </button>
               <button
                 onClick={() => switchView("board")}
@@ -369,6 +382,9 @@ export default function StarCRM() {
 
         {/* Starbot chat tab */}
         {view === "chat" && <StarbotChat />}
+
+        {/* Task board tab */}
+        {view === "tasks" && <TaskBoard />}
 
         {view === "board" && <>
         {/* Scan error banner */}
@@ -445,8 +461,6 @@ export default function StarCRM() {
             )}
 
             {selected.notes && <p className="mt-4 text-sm leading-relaxed whitespace-pre-wrap">{selected.notes}</p>}
-
-            {selected.hasCard && <CardImage contactId={selected.id} />}
 
             <div className="mt-5">
               <div className="font-mono text-xs uppercase tracking-widest mb-2" style={{ color: INK }}>Log a touch</div>
@@ -662,25 +676,3 @@ function UserSwitcher({ users, userId, onSwitch, onAdd, onRename, onDelete }) {
   );
 }
 
-function CardImage({ contactId }) {
-  const [url, setUrl] = useState(null);
-  useEffect(() => {
-    let active = true;
-    let made = null;
-    api.fetchCardBlobUrl(contactId).then((u) => {
-      if (active && u) { setUrl(u); made = u; }
-      else if (u) URL.revokeObjectURL(u);
-    });
-    return () => {
-      active = false;
-      if (made) URL.revokeObjectURL(made);
-    };
-  }, [contactId]);
-  if (!url) return null;
-  return (
-    <div className="mt-4">
-      <div className="font-mono text-xs uppercase tracking-widest mb-2" style={{ color: INK }}>Business card</div>
-      <img src={url} alt="Business card" className="max-h-56 rounded border" style={{ borderColor: "#cdd6d4" }} />
-    </div>
-  );
-}

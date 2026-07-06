@@ -369,6 +369,12 @@ export default function StarbotChat() {
                   {t.text}
                 </div>
                 <div className="font-mono text-[10px] mt-0.5" style={{ color: "#8b9a9f" }}>
+                  {t.priority && (
+                    <span className="uppercase font-bold mr-1.5" style={{ color: t.priority === "high" ? TIDE : t.priority === "medium" ? "#B7791F" : "#4A5A6A" }}>
+                      {t.priority}
+                    </span>
+                  )}
+                  {t.status === "in_progress" && <span className="mr-1.5" style={{ color: SEA }}>in progress</span>}
                   {t.due && <span style={{ color: t.due < new Date().toISOString().slice(0, 10) && !t.done ? TIDE : undefined }}>due {t.due}</span>}
                   {t.due && t.source ? " · " : ""}
                   {t.source && (t.sourceLink

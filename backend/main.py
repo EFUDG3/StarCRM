@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.orm import Session
@@ -46,17 +46,25 @@ def _ensure_schema() -> None:
         if "user_id" not in columns:
             Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    # Additive, idempotent migration for the card-image columns.
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS card_image BYTEA"))
-        conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS card_image_type VARCHAR"))
         conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS category_label VARCHAR"))
+        # Card-image storage removed 2026-07 (space + UI cleanup; scans still
+        # prefill contacts, the photo just isn't kept). Blobs were exported to
+        # ~/Documents/starbot-card-image-backup before this shipped.
+        conn.execute(text("ALTER TABLE contacts DROP COLUMN IF EXISTS card_image"))
+        conn.execute(text("ALTER TABLE contacts DROP COLUMN IF EXISTS card_image_type"))
         # Entra identity columns on users (additive; safe on existing data).
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS microsoft_oid VARCHAR"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_microsoft_oid ON users (microsoft_oid)"))
         # Starbot chat: per-user MSAL (Graph) token cache. Additive.
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS m365_token_cache TEXT"))
+        # Task board: kanban status + priority on todos. Additive; the one-time
+        # backfill maps the legacy done flag onto status (done stays synced to
+        # status from here on, so this never un-does a reopened task).
+        conn.execute(text("ALTER TABLE todos ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'todo'"))
+        conn.execute(text("ALTER TABLE todos ADD COLUMN IF NOT EXISTS priority VARCHAR"))
+        conn.execute(text("UPDATE todos SET status = 'done' WHERE done = TRUE AND status = 'todo'"))
 
 
 _ensure_schema()
@@ -128,25 +136,9 @@ def serialize(c: Contact) -> dict:
         "nextAction": c.next_action or "",
         "nextDue": c.next_due or "",
         "notes": c.notes or "",
-        "hasCard": c.card_image is not None,
         "created": c.created_at.date().isoformat() if c.created_at else "",
         "log": [{"date": i.date, "note": i.note} for i in log],
     }
-
-
-def _store_card(contact: Contact, card_image: str | None) -> None:
-    """If a card data URL is provided, downscale and attach it to the contact.
-    Absent/blank leaves any existing image untouched."""
-    if not card_image:
-        return
-    raw, _ = cards.parse_data_url(card_image)
-    if not raw:
-        return
-    try:
-        contact.card_image = cards.downscale_to_jpeg(raw)
-        contact.card_image_type = "image/jpeg"
-    except Exception:
-        pass  # bad image — keep the contact, just skip the attachment
 
 
 def load_seed(db: Session, user: User) -> None:
@@ -285,10 +277,16 @@ def patch_todo(
     user: User = Depends(m365.get_session_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    """Partial update: any of text/due/status/priority (the task board), plus
+    the legacy `done` boolean (the chat rail's checkbox)."""
+    fields = payload.model_dump(exclude_unset=True)
+    if "done" in fields:
+        fields["status"] = "done" if fields.pop("done") else "todo"
     try:
-        return chat.op_set_todo_done(db, user, todo_id, done=payload.done)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="To-do not found")
+        return chat.op_update_todo(db, user, todo_id, **fields)
+    except ValueError as e:
+        code = 404 if "not found" in str(e).lower() else 400
+        raise HTTPException(status_code=code, detail=str(e))
 
 
 @app.delete("/api/todos/{todo_id}", status_code=204)
@@ -372,7 +370,6 @@ def create_contact(
         next_due=payload.nextDue,
         notes=payload.notes,
     )
-    _store_card(contact, payload.cardImage)
     db.add(contact)
     db.commit()
     db.refresh(contact)
@@ -406,7 +403,6 @@ def update_contact(
     contact.next_action = payload.nextAction
     contact.next_due = payload.nextDue
     contact.notes = payload.notes
-    _store_card(contact, payload.cardImage)
     db.commit()
     db.refresh(contact)
     return serialize(contact)
@@ -472,8 +468,8 @@ async def scan_card(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Read a business-card photo with Claude vision and return prefill fields
-    plus a compact JPEG data URL to store when the contact is saved. Does not
-    persist anything itself — the review-then-save flow handles storage."""
+    plus a JPEG data URL the review form shows for verification. The image is
+    NEVER persisted (card-image storage was removed to save DB space)."""
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Empty file")
@@ -489,21 +485,6 @@ async def scan_card(
         raise HTTPException(status_code=502, detail=f"Card extraction failed: {e}")
     fields["cardImage"] = cards.to_data_url(jpeg)
     return fields
-
-
-@app.get("/api/contacts/{contact_id}/card")
-def get_card(
-    contact_id: str,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> Response:
-    contact = _get_or_404(db, user, contact_id)
-    if not contact.card_image:
-        raise HTTPException(status_code=404, detail="No card image")
-    return Response(
-        content=contact.card_image,
-        media_type=contact.card_image_type or "image/jpeg",
-    )
 
 
 # --- Claude connector: mount the MCP server at /mcp (when configured) -------

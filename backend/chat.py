@@ -46,14 +46,23 @@ def _anthropic() -> anthropic.Anthropic:
 
 
 # --- Todos (shared by the REST routes in main.py and the chat tools) --------
+VALID_STATUSES = ("todo", "in_progress", "done")
+VALID_PRIORITIES = ("low", "medium", "high")
+_STATUS_ORDER = {"todo": 0, "in_progress": 1, "done": 2}
+_PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2, "": 3}
+
+
 def serialize_todo(t: Todo) -> dict:
+    status = t.status or ("done" if t.done else "todo")
     return {
         "id": t.id,
         "text": t.text,
         "due": t.due or "",
         "source": t.source or "",
         "sourceLink": t.source_link or "",
-        "done": bool(t.done),
+        "status": status,
+        "priority": t.priority or "",
+        "done": status == "done",
         "created": t.created_at.date().isoformat() if t.created_at else "",
     }
 
@@ -61,9 +70,14 @@ def serialize_todo(t: Todo) -> dict:
 def op_list_todos(db: Session, user: User, include_done: bool = False) -> list[dict]:
     q = db.query(Todo).filter(Todo.user_id == user.id)
     if not include_done:
-        q = q.filter(Todo.done.is_(False))
+        q = q.filter(Todo.status != "done")
     rows = q.all()
-    rows.sort(key=lambda t: (bool(t.done), t.due or "9999", t.created_at or date_cls.min))
+    rows.sort(key=lambda t: (
+        _STATUS_ORDER.get(t.status or "todo", 0),
+        _PRIORITY_ORDER.get(t.priority or "", 3),
+        t.due or "9999",
+        t.created_at or date_cls.min,
+    ))
     return [serialize_todo(t) for t in rows]
 
 
@@ -73,12 +87,15 @@ def op_add_todos(db: Session, user: User, items: list[dict]) -> list[dict]:
         text = (item.get("text") or "").strip()
         if not text:
             continue
+        priority = (item.get("priority") or "").strip().lower()
         t = Todo(
             user_id=user.id,
             text=text,
             due=(item.get("due") or "").strip(),
             source=(item.get("source") or "").strip(),
             source_link=(item.get("source_link") or item.get("sourceLink") or "").strip(),
+            priority=priority if priority in VALID_PRIORITIES else None,
+            status="todo",
         )
         db.add(t)
         created.append(t)
@@ -86,13 +103,35 @@ def op_add_todos(db: Session, user: User, items: list[dict]) -> list[dict]:
     return [serialize_todo(t) for t in created]
 
 
-def op_set_todo_done(db: Session, user: User, todo_id: str, done: bool = True) -> dict:
+def op_update_todo(db: Session, user: User, todo_id: str, **fields) -> dict:
+    """Partial update of text/due/status/priority; keeps the legacy done flag
+    in sync with status."""
     t = db.query(Todo).filter(Todo.id == todo_id, Todo.user_id == user.id).first()
     if t is None:
         raise ValueError("To-do not found")
-    t.done = done
+    if fields.get("text") is not None:
+        if not fields["text"].strip():
+            raise ValueError("text cannot be empty")
+        t.text = fields["text"].strip()
+    if fields.get("due") is not None:
+        t.due = fields["due"].strip()
+    if fields.get("status") is not None:
+        status = fields["status"].strip().lower()
+        if status not in VALID_STATUSES:
+            raise ValueError(f"status must be one of {', '.join(VALID_STATUSES)}")
+        t.status = status
+        t.done = status == "done"
+    if fields.get("priority") is not None:
+        priority = fields["priority"].strip().lower()
+        if priority and priority not in VALID_PRIORITIES:
+            raise ValueError(f"priority must be one of {', '.join(VALID_PRIORITIES)} or empty")
+        t.priority = priority or None
     db.commit()
     return serialize_todo(t)
+
+
+def op_set_todo_done(db: Session, user: User, todo_id: str, done: bool = True) -> dict:
+    return op_update_todo(db, user, todo_id, status="done" if done else "todo")
 
 
 def op_delete_todo(db: Session, user: User, todo_id: str) -> dict:
@@ -184,9 +223,12 @@ TOOLS = [
     {
         "name": "add_todos",
         "description": (
-            "Add items to the user's to-do list. Set `source` to a short origin label "
-            "(e.g. 'Email: \"RE: invoice\" — Bob, Jun 30') and `source_link` to the "
-            "item's webLink whenever the to-do came from an email/event/file."
+            "Add items to the user's task board (they land in the To do column). "
+            "Set `source` to a short origin label (e.g. 'Email: \"RE: invoice\" — "
+            "Bob, Jun 30') and `source_link` to the item's webLink whenever the "
+            "task came from an email/event/file. Set `priority` (high/medium/low) "
+            "when urgency is clear — deadlines, unhappy customers, and boss "
+            "requests are high."
         ),
         "input_schema": {
             "type": "object",
@@ -200,6 +242,7 @@ TOOLS = [
                             "due": _DATE,
                             "source": _STR,
                             "source_link": _STR,
+                            "priority": {**_STR, "description": "low | medium | high"},
                         },
                         "required": ["text"],
                     },
@@ -210,10 +253,29 @@ TOOLS = [
     },
     {
         "name": "complete_todo",
-        "description": "Mark one to-do done (or not done) by id.",
+        "description": "Mark one task done (or reopen it) by id.",
         "input_schema": {
             "type": "object",
             "properties": {"todo_id": _STR, "done": {"type": "boolean", "description": "Default true"}},
+            "required": ["todo_id"],
+        },
+    },
+    {
+        "name": "update_todo",
+        "description": (
+            "Update one task: move it between board columns (status: todo / "
+            "in_progress / done), set priority (low/medium/high, empty clears), "
+            "or change text/due date. Only pass fields you're changing."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "todo_id": _STR,
+                "status": {**_STR, "description": "todo | in_progress | done"},
+                "priority": {**_STR, "description": "low | medium | high | '' to clear"},
+                "text": _STR,
+                "due": _DATE,
+            },
             "required": ["todo_id"],
         },
     },
@@ -267,7 +329,9 @@ invent a link or a fact you didn't read from a tool result.
 - To-do requests ("make a to-do list from my emails"): call list_todos first, then scan \
 list_recent_emails (and the calendar when relevant), propose clear action items with due \
 dates when the email implies one, and add them with add_todos including source + \
-source_link. Skip anything already on the list; say so briefly.
+source_link, plus a priority when urgency is clear. Skip anything already on the list; \
+say so briefly. Tasks live on the user's Tasks board (columns: To do / In progress / \
+Done) — use update_todo to move or re-prioritize them when asked.
 - BE FRUGAL WITH FULL EMAIL READS. The preview from list/search results is usually enough \
 to triage or extract a to-do. Call read_email only when the decision truly needs the body \
 (e.g. drafting a reply, a specific detail the user asked for), at most 2-3 per request, \
@@ -309,6 +373,12 @@ def _run_tool(name: str, args: dict, user: User, db: Session, token: str):
         return op_add_todos(db, user, args.get("items") or [])
     if name == "complete_todo":
         return op_set_todo_done(db, user, args["todo_id"], done=args.get("done", True))
+    if name == "update_todo":
+        return op_update_todo(
+            db, user, args["todo_id"],
+            status=args.get("status"), priority=args.get("priority"),
+            text=args.get("text"), due=args.get("due"),
+        )
     if name == "delete_todo":
         return op_delete_todo(db, user, args["todo_id"])
     if name == "search_crm_contacts":
@@ -365,7 +435,7 @@ def _clean_blocks(content) -> list[dict]:
     return out
 
 
-_TODO_TOOLS = {"add_todos", "complete_todo", "delete_todo"}
+_TODO_TOOLS = {"add_todos", "complete_todo", "update_todo", "delete_todo"}
 
 
 def stream_chat(messages: list[dict], user_id: str, graph_token: str):

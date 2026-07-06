@@ -93,17 +93,6 @@ export const scanCard = async (file, timeoutMs = 30000) => {
   }
 };
 
-// Fetch a stored card image (needs the user header, so we can't use a plain
-// <img src>) and return an object URL. Caller should revoke it when done.
-export const fetchCardBlobUrl = async (id) => {
-  const uid = getCurrentUser();
-  const res = await fetch(`${BASE}/api/contacts/${id}/card`, {
-    headers: uid ? { "X-User-Id": uid } : {},
-  });
-  if (!res.ok) return null;
-  return URL.createObjectURL(await res.blob());
-};
-
 // --- Starbot (M365 session cookie, not X-User-Id) ---------------------------
 // These endpoints authenticate with the httpOnly session cookie set by the
 // Microsoft sign-in redirect, so every call needs credentials: "include".
@@ -129,11 +118,14 @@ export const authLogout = () => sessionRequest("/api/auth/logout", { method: "PO
 // Sign-in is a full-page redirect (Microsoft login), not an XHR.
 export const authLoginUrl = () => `${BASE}/api/auth/login`;
 
-export const listTodos = () => sessionRequest("/api/todos");
-export const addTodo = (text, due = "") =>
-  sessionRequest("/api/todos", { method: "POST", body: JSON.stringify({ text, due }) });
-export const setTodoDone = (id, done) =>
-  sessionRequest(`/api/todos/${id}`, { method: "PATCH", body: JSON.stringify({ done }) });
+export const listTodos = (includeDone = false) =>
+  sessionRequest(`/api/todos${includeDone ? "?include_done=true" : ""}`);
+export const addTodo = (text, due = "", priority = "") =>
+  sessionRequest("/api/todos", { method: "POST", body: JSON.stringify({ text, due, priority }) });
+// Partial update: any of { text, due, status, priority, done }.
+export const updateTodo = (id, patch) =>
+  sessionRequest(`/api/todos/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+export const setTodoDone = (id, done) => updateTodo(id, { done });
 export const deleteTodo = (id) =>
   sessionRequest(`/api/todos/${id}`, { method: "DELETE" });
 

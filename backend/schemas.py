@@ -22,8 +22,8 @@ class ContactIn(BaseModel):
     nextAction: str = ""
     nextDue: str = ""
     notes: str = ""
-    # Optional data URL ("data:image/jpeg;base64,...") of a scanned card to store.
-    cardImage: Optional[str] = None
+    # (cardImage removed 2026-07 — scans prefill fields but photos aren't stored.
+    # Older clients may still send the key; pydantic ignores unknown fields.)
 
 
 class LogIn(BaseModel):
@@ -47,7 +47,13 @@ class TodoIn(BaseModel):
     due: str = ""          # ISO date string, may be empty
     source: str = ""       # origin label, e.g. 'Email: "RE: invoice" — Bob'
     source_link: str = ""  # webLink to the originating email/event/file
+    priority: str = ""     # low | medium | high | "" (none)
 
 
 class TodoPatch(BaseModel):
-    done: bool
+    """Partial task update — send only the fields you're changing."""
+    text: Optional[str] = None
+    due: Optional[str] = None
+    status: Optional[str] = None    # todo | in_progress | done
+    priority: Optional[str] = None  # low | medium | high | "" clears it
+    done: Optional[bool] = None     # legacy alias for status todo/done
