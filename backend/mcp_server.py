@@ -16,8 +16,11 @@ NOTE: the OAuth/resource-metadata wiring (AuthSettings) needs the real Entra
 values and the deployed MCP URL to finalize — see build_mcp_app(). The CRM
 logic below does not depend on that and is fully exercised by the tests.
 """
-from __future__ import annotations
-
+# NOTE: do NOT add `from __future__ import annotations` here. FastMCP's
+# Tool.from_function inspects raw parameter annotations (issubclass(..., Context)).
+# Stringized annotations (PEP 563) turn `str` into "str", so get_origin() is None
+# and issubclass() throws 'issubclass() arg 1 must be a class' — the connector then
+# fails to mount. Python 3.13 evaluates the `X | None` syntax below natively anyway.
 from datetime import date as date_cls
 from typing import Optional
 
@@ -201,18 +204,42 @@ def build_mcp_app():
             except Exception:
                 return None
             oid = claims.get("oid") or claims.get("sub") or "unknown"
+            # Entra stamps only the SHORT scope name (e.g. "access_as_user") into the
+            # token's `scp`. RequireAuthMiddleware checks required_scopes (the full
+            # api://<client-id>/access_as_user URI, which Claude must REQUEST) against
+            # this list, so expose both the short names and their fully-qualified forms.
+            short = (claims.get("scp") or "").split()
+            scopes = short + [f"api://{auth.CLIENT_ID}/{s}" for s in short]
             return AccessToken(
-                token=token, client_id=oid, scopes=[], expires_at=claims.get("exp")
+                token=token, client_id=oid, scopes=scopes, expires_at=claims.get("exp")
             )
+
+    # Our own origin (…/mcp -> …). We advertise THIS as the authorization server,
+    # not Entra directly: main.py serves an RFC 8414 metadata doc here that points
+    # Claude at Microsoft's real authorize/token endpoints and advertises PKCE
+    # S256. Entra's own metadata omits S256 and has no RFC 8414 doc, so Claude
+    # can't discover it and otherwise falls back to guessing /authorize on us.
+    origin = resource_url.rsplit("/mcp", 1)[0] or resource_url
 
     mcp = FastMCP(
         "Star CRM",
         token_verifier=EntraTokenVerifier(),
         auth=AuthSettings(
-            issuer_url=f"https://login.microsoftonline.com/{auth.TENANT_ID}/v2.0",
+            issuer_url=origin,
             resource_server_url=resource_url,
-            required_scopes=[],
+            # Advertise the FULL scope URI so it lands in the protected-resource
+            # metadata's scopes_supported and Claude requests it. Microsoft rejects a
+            # bare "access_as_user" and rejects an offline_access-only request with no
+            # resource scope, so this value is what makes the token request valid.
+            # EntraTokenVerifier reports this same full URI as a held scope (Entra only
+            # puts the short name in `scp`), so the middleware check passes.
+            required_scopes=[f"api://{auth.CLIENT_ID}/access_as_user"],
         ),
+        # Serve the MCP endpoint at the sub-app root so that mounting this app at
+        # "/mcp" in main.py yields the endpoint at "/mcp" (not "/mcp/mcp"). The
+        # default "/mcp" path would double under the mount. MCP_RESOURCE_URL must
+        # therefore end in "/mcp" so the advertised resource-metadata URL lines up.
+        streamable_http_path="/",
     )
 
     @mcp.tool()
@@ -311,4 +338,35 @@ def build_mcp_app():
         finally:
             db.close()
 
-    return mcp.streamable_http_app()
+    app = mcp.streamable_http_app()
+
+    # Override the protected-resource metadata's `resource` field to the Entra App
+    # ID URI (api://<client-id>) instead of the HTTP MCP URL. Claude echoes this
+    # value as the RFC 8707 `resource` parameter at Entra's token endpoint, and
+    # Entra only accepts a registered App ID URI there. The HTTP URL fails with
+    # AADSTS9010010 / invalid_target, and it can't be registered as an identifier
+    # URI because run.app is not a verified domain of the tenant. authorization_
+    # servers still points at our origin (the AS-metadata shim in main.py).
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    _prm = {
+        "resource": f"api://{auth.CLIENT_ID}",
+        "authorization_servers": [origin.rstrip("/") + "/"],
+        "scopes_supported": [f"api://{auth.CLIENT_ID}/access_as_user"],
+        "bearer_methods_supported": ["header"],
+    }
+
+    async def _protected_resource_metadata(request):  # noqa: ANN001
+        return JSONResponse(_prm)
+
+    for _i, _route in enumerate(app.routes):
+        if getattr(_route, "path", "") == "/.well-known/oauth-protected-resource":
+            app.routes[_i] = Route(
+                "/.well-known/oauth-protected-resource",
+                endpoint=_protected_resource_metadata,
+                methods=["GET", "OPTIONS"],
+            )
+            break
+
+    return app

@@ -25,6 +25,12 @@ CLIENT_ID = os.getenv("ENTRA_CLIENT_ID", "")
 AUDIENCE = os.getenv("ENTRA_AUDIENCE", "") or CLIENT_ID
 ENTRA_ENABLED = bool(TENANT_ID and CLIENT_ID)
 
+# A v2 Entra access token may carry its audience as either the App ID URI
+# (api://<client-id>) or the bare client-id GUID, depending on how the API/scope
+# is configured. Accept any of these forms so a config mismatch doesn't silently
+# reject every token. PyJWT passes if the token's `aud` matches any entry.
+ACCEPTED_AUDIENCES = list({AUDIENCE, CLIENT_ID, f"api://{CLIENT_ID}"} - {"", "api://"})
+
 _ISSUER = f"https://login.microsoftonline.com/{TENANT_ID}/v2.0" if TENANT_ID else ""
 _JWKS_URL = (
     f"https://login.microsoftonline.com/{TENANT_ID}/discovery/v2.0/keys"
@@ -46,7 +52,7 @@ def validate_entra_token(token: str) -> dict:
             token,
             signing_key,
             algorithms=["RS256"],
-            audience=AUDIENCE,
+            audience=ACCEPTED_AUDIENCES,
             issuer=_ISSUER,
             options={"require": ["exp", "iss", "aud"]},
         )

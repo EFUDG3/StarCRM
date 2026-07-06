@@ -10,6 +10,7 @@ Run locally:
     uvicorn main:app --reload
 """
 import os
+from contextlib import asynccontextmanager
 from datetime import date as date_cls
 from pathlib import Path
 
@@ -56,7 +57,35 @@ def _ensure_schema() -> None:
 
 _ensure_schema()
 
-app = FastAPI(title="Star CRM API", version="0.1.0")
+
+# Build the Claude connector (MCP) sub-app BEFORE creating the FastAPI app, so
+# its StreamableHTTP session-manager lifespan can be propagated into the app's
+# own lifespan below (Starlette does NOT run a mounted sub-app's lifespan on its
+# own — without this, the first MCP request 500s with "Task group is not
+# initialized"). Guarded: a missing MCP SDK or unconfigured Entra simply leaves
+# the connector unmounted; the rest of the API is unaffected.
+_mcp_app = None
+try:
+    import mcp_server
+    _mcp_app = mcp_server.build_mcp_app()
+except Exception as _mcp_err:
+    import logging
+    logging.getLogger("uvicorn.error").info("MCP connector not mounted: %s", _mcp_err)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup/shutdown. Seeds the demo profile on an empty DB and, when the
+    connector is mounted, runs the MCP session manager's lifespan."""
+    _seed_on_first_run()
+    if _mcp_app is not None:
+        async with _mcp_app.router.lifespan_context(_mcp_app):
+            yield
+    else:
+        yield
+
+
+app = FastAPI(title="Star CRM API", version="0.1.0", lifespan=lifespan)
 
 # CORS: only the frontend origin(s) may call the API from a browser.
 # Override in production via FRONTEND_ORIGINS (comma-separated).
@@ -177,10 +206,10 @@ def _get_or_404(db: Session, user: User, contact_id: str) -> Contact:
     return contact
 
 
-@app.on_event("startup")
-def seed_on_first_run() -> None:
+def _seed_on_first_run() -> None:
     """On an empty database, create the initial 'Bob Bendixen' profile and seed
-    his 26 contacts so the app opens populated. New users start blank."""
+    his 26 contacts so the app opens populated. New users start blank. Called
+    from the lifespan handler above."""
     db = next(get_db())
     try:
         if db.query(User).count() == 0:
@@ -402,14 +431,58 @@ def get_card(
 
 
 # --- Claude connector: mount the MCP server at /mcp (when configured) -------
-# Registered before the SPA catch-all so its routes aren't intercepted. Guarded
-# so a missing MCP SDK or unconfigured Entra never takes down the main API.
-try:
-    import mcp_server
-    app.mount("/mcp", mcp_server.build_mcp_app())
-except Exception as _mcp_err:
-    import logging
-    logging.getLogger("uvicorn.error").info("MCP connector not mounted: %s", _mcp_err)
+# Built above (so its lifespan is wired into the FastAPI app). Mounted here,
+# before the SPA catch-all, so its routes aren't intercepted. The sub-app serves
+# its endpoint at "/", so mounting at "/mcp" exposes the connector at "/mcp".
+if _mcp_app is not None:
+    from fastapi.responses import JSONResponse, RedirectResponse
+
+    # A bare "/mcp" (no trailing slash) would otherwise fall through to the SPA
+    # catch-all and return 405/404, because the MCP app is mounted at "/mcp/".
+    # Redirect it (307 preserves method + body) so a connector URL without the
+    # trailing slash still reaches the endpoint. Registered BEFORE the mount so it
+    # wins the exact "/mcp" match; "/mcp/..." still routes into the mount.
+    @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
+    def _mcp_trailing_slash() -> RedirectResponse:
+        return RedirectResponse("/mcp/", status_code=307)
+
+    app.mount("/mcp", _mcp_app)
+
+    # OAuth Authorization Server metadata shim. Microsoft Entra publishes no RFC
+    # 8414 document and omits `code_challenge_methods_supported`, so Claude's
+    # connector can't discover it as the auth server and falls back to guessing
+    # /authorize on our own origin. We publish a compliant metadata doc at our
+    # origin that points Claude straight at Microsoft's real authorize/token
+    # endpoints and explicitly advertises PKCE S256. Served under both the OAuth
+    # and OIDC well-known names because connectors probe either. The protected-
+    # resource metadata (from mcp_server.py) advertises this origin as the
+    # authorization server, so Claude lands here.
+
+    _AS_ORIGIN = os.getenv("MCP_RESOURCE_URL", "http://localhost:8000/mcp").rsplit("/mcp", 1)[0]
+    # Match the trailing slash that AnyHttpUrl puts on authorization_servers in the
+    # protected-resource metadata; RFC 8414 requires issuer to match byte-for-byte.
+    _AS_ISSUER = _AS_ORIGIN.rstrip("/") + "/"
+    _ENTRA_OAUTH = f"https://login.microsoftonline.com/{auth.TENANT_ID}/oauth2/v2.0"
+    _AS_METADATA = {
+        "issuer": _AS_ISSUER,
+        "authorization_endpoint": f"{_ENTRA_OAUTH}/authorize",
+        "token_endpoint": f"{_ENTRA_OAUTH}/token",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": [
+            "client_secret_post", "client_secret_basic",
+        ],
+        "scopes_supported": [
+            f"api://{auth.CLIENT_ID}/access_as_user",
+            "openid", "profile", "offline_access",
+        ],
+    }
+
+    @app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
+    @app.get("/.well-known/openid-configuration", include_in_schema=False)
+    def oauth_authorization_server_metadata() -> JSONResponse:
+        return JSONResponse(_AS_METADATA)
 
 
 # --- Serve the built frontend (single-service deploy) -----------------------
@@ -427,10 +500,24 @@ if _STATIC_DIR.is_dir():
     def serve_index() -> FileResponse:
         return FileResponse(_STATIC_DIR / "index.html")
 
+    # Path heads that must NEVER fall back to the SPA. OAuth/MCP discovery probes
+    # (well-known docs, /authorize, /token, /register, …) have to return a real 404
+    # so Claude's connector follows the protected-resource metadata to Microsoft
+    # Entra instead of mistaking the React app (served as HTTP 200 HTML) for an
+    # authorization server. /api and /mcp are handled by real routes above; listed
+    # here defensively so they can never resolve to index.html either.
+    _NON_SPA_HEADS = {
+        "authorize", "token", "register", "revoke", "introspect", "mcp", "api",
+    }
+
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_spa(full_path: str) -> FileResponse:
         """Serve a real static file if it exists; otherwise fall back to
-        index.html so client-side routing works."""
+        index.html so the state-driven UI loads on a deep link. OAuth/MCP/API
+        paths get a real 404 instead of the SPA (see _NON_SPA_HEADS)."""
+        head = full_path.split("/", 1)[0]
+        if full_path.startswith(".well-known") or head in _NON_SPA_HEADS:
+            raise HTTPException(status_code=404, detail="Not found")
         candidate = (_STATIC_DIR / full_path).resolve()
         if candidate.is_file() and _STATIC_DIR in candidate.parents:
             return FileResponse(candidate)
