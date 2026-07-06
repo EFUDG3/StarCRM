@@ -6,13 +6,41 @@ business-card scanning, multi-user profiles, and (in progress) a Claude connecto
 
 This file is the single source of truth for picking the project back up. Read it first.
 
-> **Resume note (2026-07-06) — mid-migration, rebrand in progress.**
-> - **Rebrand:** the project is becoming **"starbot"** (the future main Star site), not just a CRM. New resources use the `starbot` name.
-> - **Hosting move (Google → Azure), in progress:** deployed to **Azure Container Apps** — resource group `starbot`, env `starbot-env`, region `westus3`, port `8080`, via `az containerapp up --source .`, still pointed at the **Neon** DB. Old **Google Cloud Run** service is still live production until cutover.
-> - **Env-var gotcha that broke the first Azure run (likely still needs fixing):** `--env-vars` takes each `key=value` as its OWN space-separated, individually-quoted token. All pairs wrapped in ONE quoted string got swallowed into `DATABASE_URL` (`invalid sslmode value: "require ANTHROPIC_API_KEY=..."`), so the container crash-looped and the site timed out. Fix (also does Phase 2 = move secrets off plaintext):
->   `az containerapp secret set -n starbot -g starbot --secrets "database-url=<neon-url>" "anthropic-api-key=<key>"`
->   `az containerapp update -n starbot -g starbot --set-env-vars "DATABASE_URL=secretref:database-url" "ANTHROPIC_API_KEY=secretref:anthropic-api-key" "ENTRA_TENANT_ID=c80d56a1-72d7-4130-aab1-1150a1782ba9" "ENTRA_CLIENT_ID=066b737b-a053-4b53-af03-5cabc03fbf26" "ENTRA_AUDIENCE=api://066b737b-a053-4b53-af03-5cabc03fbf26"`
->   Confirm the site + `/api/health` load after the new revision before anything else.
+> **Resume note (2026-07-06, evening) — starbot phase 1 (in-app M365 chat) built + deploying.**
+> - **The product pivot:** this is now **starbot**, Star's company-wide internal AI assistant
+>   (Copilot-style chat over each user's OWN email/calendar/SharePoint via per-user M365
+>   OAuth), with the CRM as one tab. Owner (Salam) requirements — from the cancelled Data Net
+>   "Starbot" project: (1) query email/OneDrive/SharePoint/docs, (2) review emails + draft
+>   replies, (3) organize/flag action items, (4) to-do lists + reminders; plus persistent
+>   context workspaces and doc-generation-from-templates later. Phase 1 demo features chosen:
+>   **to-do list from email/calendar** and **inbox triage** (search+citations and drafting come
+>   free with the same tools). On-demand only — NO background processing, no stored automation.
+> - **Phase 1 code (committed `ab1c425`):** `backend/m365.py` (server-side OAuth: MSAL
+>   confidential client, `/api/auth/login|callback|me|logout`, signed-JWT session cookie,
+>   per-user Graph token cache in `users.m365_token_cache`); `backend/graph.py` (mail
+>   search/read, inbox list, calendarView Pacific, SharePoint/OneDrive `/search/query`);
+>   `backend/chat.py` (Claude agent loop over SSE at `POST /api/chat`, 11 tools incl. todos +
+>   CRM op_*); todos table + REST; `frontend/src/Chat.jsx` + Starbot/Board tabs (`#starbot`).
+>   Client holds the chat history (server stateless); CHAT_MODEL defaults claude-sonnet-4-6.
+> - **Entra app `066b737b` configured today via az:** redirect URIs ADDED (kept claude.ai +
+>   run.app ones): `https://starbot.ashymoss-2b719eff.westus3.azurecontainerapps.io/api/auth/callback`
+>   and `http://localhost:8000/api/auth/callback`; delegated Graph scopes Mail.Read,
+>   Calendars.Read, Sites.Read.All, Files.Read.All (+User.Read) with tenant **admin consent
+>   granted**; `requestedAccessTokenVersion: 2` set (was null — this was connector open item);
+>   new client secret **"starbot-chat", expires 2028-07-06** → Container Apps secret
+>   `entra-client-secret` + local `backend/.env`.
+> - **Container app env FIXED (the old plaintext-env problem):** secrets `database-url`,
+>   `anthropic-api-key`, `entra-client-secret`, `session-secret` all set, env vars use
+>   `secretref:`; plus `ENTRA_TENANT_ID/CLIENT_ID/AUDIENCE`, `PUBLIC_BASE_URL`,
+>   `MCP_RESOURCE_URL` (both pointing at the azurecontainerapps.io https origin). Remember:
+>   `--set-env-vars` takes each `key=value` as its OWN quoted token, never one big string.
+> - **KEY FACT: DNS blocks ONLY the Claude MCP connector** (Entra App ID URIs need a verified
+>   domain). In-app M365 sign-in works on the azurecontainerapps.io host — redirect URIs have
+>   no verified-domain rule. So the chat is fully usable while DNS waits on DataNet/boss.
+> - **Secret rotation: deferred by owner decision (2026-07-06)** while only Ethan + one
+>   coworker have access. HARD GATE before the first non-IT user signs in: rotate the Neon
+>   password + Anthropic key (both were pasted in chat/logs historically). New secrets from
+>   today were never displayed (created via az → variables → secret store).
 > - **Connector is blocked on DNS.** It needs the app served at `starbot.starflooringandremodeling.com` (a verified subdomain) before Entra will accept the OAuth resource. Two records (CNAME `starbot` → the Container App FQDN, TXT `asuid.starbot` → the app's `customDomainVerificationId`) must be added at the site's DNS host — nameservers are `ns1/ns2.securedservers.info` (a VPS run by **DataNet or Greenman IT**, reached via the boss). GoDaddy only *registers* the domain; its DNS is elsewhere. Do NOT use GoDaddy Forwarding and do NOT switch nameservers.
 > - **After DNS:** repoint App ID URI + scope + `ACCEPTED_AUDIENCES` + `MCP_RESOURCE_URL` to the custom domain, set Manifest `requestedAccessTokenVersion: 2`, redeploy, point the connector there. Heads-up: Entra's RFC 8707 support is finicky, so budget one more tuning pass (see "Connector OAuth" section + FastMCP's Azure integration guide).
 > - **Confirmed via web research:** the verified-domain wall is **Microsoft Entra-specific**, not a Claude/MCP requirement (Entra identifier URIs must be a verified/initial tenant domain; other IdPs like Auth0 don't require it, and Entra's RFC 8707 support is finicky — see the "Connector OAuth" section).
@@ -314,10 +342,10 @@ who owns what and what to check first.
 - **Domain:** crm.starflooringandremodeling.com (planned), company-owned.
 
 **The thing most likely to break unattended: the Entra client secret.** Entra client
-secrets EXPIRE. When the connector's secret expires, Claude can no longer sign in and the
-connector silently stops (the website is unaffected). Use the longest expiry (or a
-certificate) and record it here:
-- Client secret expires: __________  (set at creation; update on each rotation)
+secrets EXPIRE. When a secret expires, the thing using it silently stops working (the
+CRM board is unaffected). Use the longest expiry (or a certificate) and record it here:
+- `starbot-chat` (M365 sign-in for the chat tab) expires: **2028-07-06**
+- `OauthForStarCRM` (Claude connector) expires: **2028-06-29**
 - Rotate: Entra → app `066b737b-…` → Certificates & secrets → new client secret → copy the
   **Value** → paste into the Claude connector settings.
 
