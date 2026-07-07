@@ -41,3 +41,9 @@ html {
 .starbot-md th, .starbot-md td { border: 1px solid #e5e0d8; padding: 0.3rem 0.55rem; text-align: left; }
 .starbot-md th { background: #ffffff; font-weight: 600; }
 .starbot-md hr { border: none; border-top: 1px solid #e5e0d8; margin: 0.75rem 0; }
+
+/* Long URLs (pasted text or markdown citation links) must wrap inside chat
+   bubbles and the to-do rail instead of stretching them past the border. */
+.starbot-md { overflow-wrap: anywhere; }
+.starbot-md a { word-break: break-all; }
+.starbot-wrap { overflow-wrap: anywhere; }

@@ -256,13 +256,13 @@ export default function StarbotChat() {
           {chat.ui.map((m, i) =>
             m.role === "user" ? (
               <div key={i} className="flex justify-end">
-                <div className="max-w-[85%] rounded-lg px-3.5 py-2 text-[15px] text-white whitespace-pre-wrap" style={{ background: INK }}>
+                <div className="starbot-wrap max-w-[85%] rounded-lg px-3.5 py-2 text-[15px] text-white whitespace-pre-wrap" style={{ background: INK }}>
                   {m.text}
                 </div>
               </div>
             ) : (
               <div key={i} className="flex justify-start">
-                <div className="max-w-[95%] min-w-0 text-[15px]">
+                <div className="starbot-wrap max-w-[95%] min-w-0 text-[15px]">
                   {m.tools?.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mb-1.5">
                       {m.tools.map((name, j) => {
@@ -369,7 +369,7 @@ export default function StarbotChat() {
                 <div className="text-[15px] leading-snug" style={{ textDecoration: t.done ? "line-through" : "none", color: t.done ? "#8b9a9f" : INK }}>
                   {t.text}
                 </div>
-                <div className="font-mono text-[10px] mt-0.5" style={{ color: "#8b9a9f" }}>
+                <div className="starbot-wrap font-mono text-[10px] mt-0.5" style={{ color: "#8b9a9f" }}>
                   {t.priority && (
                     <span className="uppercase font-bold mr-1.5" style={{ color: t.priority === "high" ? TIDE : t.priority === "medium" ? "#B7791F" : "#4A5A6A" }}>
                       {t.priority}
