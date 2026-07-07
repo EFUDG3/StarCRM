@@ -184,6 +184,35 @@ def list_calendar_events(token: str, start: str, end: str, top: int = 50) -> lis
     return out
 
 
+def list_calendar_events_for_scan(token: str, start: str, end: str) -> list[dict]:
+    """Calendar events with the fields address extraction needs: the dedicated
+    location field (often filled via Outlook's place picker) PLUS the full body
+    as text, since drivers also write addresses into descriptions."""
+    data = _request(
+        token, "GET", "/me/calendarView",
+        params={
+            "startDateTime": f"{start}T00:00:00",
+            "endDateTime": f"{end}T23:59:59",
+            "$select": "subject,start,location,bodyPreview,body",
+            "$orderby": "start/dateTime",
+            "$top": 100,
+        },
+        headers={"Prefer": f'outlook.timezone="{TIMEZONE}", outlook.body-content-type="text"'},
+    )
+    out = []
+    for e in data.get("value", []):
+        body = (e.get("body") or {}).get("content", "") or e.get("bodyPreview", "") or ""
+        if (e.get("body") or {}).get("contentType") == "html":
+            body = _strip_html(body)
+        out.append({
+            "subject": e.get("subject", ""),
+            "date": (e.get("start") or {}).get("dateTime", "")[:10],
+            "location": (e.get("location") or {}).get("displayName", ""),
+            "body": body.strip()[:1200],
+        })
+    return out
+
+
 def search_files(token: str, query: str, top: int = 10) -> list[dict]:
     """Search SharePoint + OneDrive (driveItem) the user can access."""
     if not (query or "").strip():

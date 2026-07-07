@@ -1,0 +1,421 @@
+// Mileage tab: the v2 standalone tracker rebuilt inside starbot.
+// Route math runs server-side on Azure Maps; trips and places persist per
+// user in the DB (the old page lost its log on every refresh). The Places
+// rail is a self-building address book — filled by saved trips and by
+// scanning the user's own Outlook calendar for street addresses.
+import { useEffect, useState } from "react";
+import {
+  Plus, Trash2, Copy, MapPin, Calendar, Check,
+} from "lucide-react";
+import * as api from "./api.js";
+
+const INK = "#1C1C1C";
+const MIST = "#F3F0EC";
+const SEA = "#922525";
+const TIDE = "#C0392B";
+
+const OFFICE = "4610 Alvarado Canyon Rd, San Diego, CA 92120";
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const daysAgoISO = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+};
+const fmtMoney = (n) => `$${n.toFixed(2)}`;
+
+export default function MileageTracker() {
+  const [me, setMe] = useState(null);
+  const [places, setPlaces] = useState([]);
+  const [newIds, setNewIds] = useState(new Set());
+  const [rate, setRate] = useState(0.7);
+  const [trips, setTrips] = useState(null); // null = loading
+
+  const [date, setDate] = useState(todayISO());
+  const [startAddr, setStartAddr] = useState(OFFICE);
+  const [stops, setStops] = useState([""]);
+  const [returnTrip, setReturnTrip] = useState(true);
+  const [result, setResult] = useState(null); // /route response + its date
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  const [scanStart, setScanStart] = useState(daysAgoISO(7));
+  const [scanEnd, setScanEnd] = useState(todayISO());
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanMsg, setScanMsg] = useState("");
+
+  useEffect(() => {
+    api.authMe().then(setMe).catch(() => setMe({ signedIn: false, configured: true }));
+  }, []);
+
+  const refresh = async () => {
+    const [pl, tr] = await Promise.all([
+      api.listPlaces().catch(() => []),
+      api.listTrips().catch(() => ({ rate: 0.7, trips: [] })),
+    ]);
+    setPlaces(pl);
+    setRate(tr.rate);
+    setTrips(tr.trips);
+  };
+
+  useEffect(() => {
+    if (me?.signedIn) refresh();
+  }, [me?.signedIn]);
+
+  // --- Entry ----------------------------------------------------------------
+  const setStop = (i, v) => setStops((cur) => cur.map((s, j) => (j === i ? v : s)));
+  const addStopField = () => setStops((cur) => [...cur, ""]);
+  const removeStopField = (i) =>
+    setStops((cur) => (cur.length > 1 ? cur.filter((_, j) => j !== i) : [""]));
+
+  // Clicking a place fills the first empty stop, or appends a new one.
+  const useAsStop = (address) => {
+    setStops((cur) => {
+      const i = cur.findIndex((s) => !s.trim());
+      if (i === -1) return [...cur, address];
+      return cur.map((s, j) => (j === i ? address : s));
+    });
+  };
+
+  const calculate = async () => {
+    const mid = stops.map((s) => s.trim()).filter(Boolean);
+    if (mid.length === 0) {
+      setError("Add at least one stop.");
+      return;
+    }
+    const addresses = [startAddr.trim() || OFFICE, ...mid];
+    if (returnTrip) addresses.push(startAddr.trim() || OFFICE);
+    setBusy(true);
+    setError("");
+    setSaved(false);
+    try {
+      const r = await api.mileageRoute(addresses);
+      setResult({ ...r, date });
+    } catch (e) {
+      setError(e.message || "Route failed.");
+      setResult(null);
+    }
+    setBusy(false);
+  };
+
+  const saveToLog = async () => {
+    if (!result || saved) return;
+    try {
+      await api.saveTrip({
+        date: result.date,
+        legs: result.legs,
+        totalMiles: result.totalMiles,
+        resolved: result.resolved,
+      });
+      setSaved(true);
+      refresh();
+    } catch (e) {
+      setError(e.message || "Could not save trip.");
+    }
+  };
+
+  const removeTrip = async (t) => {
+    await api.deleteTrip(t.id).catch(() => {});
+    refresh();
+  };
+
+  // --- Places ----------------------------------------------------------------
+  const removePlace = async (p) => {
+    await api.deletePlace(p.id).catch(() => {});
+    refresh();
+  };
+
+  const scan = async () => {
+    setScanBusy(true);
+    setScanMsg("");
+    try {
+      const r = await api.scanCalendar(scanStart, scanEnd);
+      setNewIds(new Set(r.new.map((p) => p.id)));
+      const parts = [`${r.scanned} event${r.scanned === 1 ? "" : "s"} scanned`,
+                     `${r.new.length} new place${r.new.length === 1 ? "" : "s"}`];
+      if (r.skipped?.length) parts.push(`${r.skipped.length} not mappable`);
+      setScanMsg(parts.join(" · "));
+      refresh();
+    } catch (e) {
+      setScanMsg(e.message || "Scan failed.");
+    }
+    setScanBusy(false);
+  };
+
+  // --- Log helpers ------------------------------------------------------------
+  const byDate = {};
+  (trips || []).forEach((t) => {
+    (byDate[t.date] = byDate[t.date] || []).push(t);
+  });
+  const logDates = Object.keys(byDate).sort().reverse();
+  const grandMiles = (trips || []).reduce((s, t) => s + t.totalMiles, 0);
+
+  const copyLog = () => {
+    let text = "Date\tMiles\tAmount\n";
+    logDates.slice().reverse().forEach((d) => {
+      byDate[d].forEach((t) => {
+        text += `${t.date}\t${t.totalMiles.toFixed(1)}\t${t.dollars.toFixed(2)}\n`;
+      });
+      const sub = byDate[d].reduce((s, t) => s + t.totalMiles, 0);
+      text += `\tSubtotal ${sub.toFixed(1)} mi\t${(sub * rate).toFixed(2)}\n`;
+    });
+    text += `\nGrand total\t${grandMiles.toFixed(1)} mi\t${(grandMiles * rate).toFixed(2)}\n`;
+    navigator.clipboard.writeText(text).catch(() => {});
+  };
+
+  // --- Gates ------------------------------------------------------------------
+  if (me === null || (me?.signedIn && trips === null)) {
+    return (
+      <div className="py-16 text-center font-mono text-sm tracking-widest uppercase" style={{ color: SEA }}>
+        Loading mileage…
+      </div>
+    );
+  }
+
+  if (!me.signedIn) {
+    return (
+      <section className="bg-white rounded-lg p-8 text-center border-l-4 max-w-lg mx-auto mt-8" style={{ borderColor: SEA }}>
+        <MapPin size={28} style={{ color: SEA }} className="mx-auto mb-3" />
+        <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "Georgia, serif" }}>Mileage tracker</h2>
+        <p className="text-[15px] mb-5" style={{ color: "#4a5a60" }}>
+          Trips and saved places are tied to your Microsoft account. Sign in to start logging.
+        </p>
+        <a href={api.authLoginUrl()} className="inline-flex items-center gap-2 px-5 py-2.5 rounded text-white text-sm font-medium" style={{ background: INK }}>
+          Sign in with Microsoft
+        </a>
+      </section>
+    );
+  }
+
+  const field = "w-full bg-white border rounded px-3 py-2 text-[15px]";
+  const bc = { borderColor: "#cdd6d4" };
+  const cap = "font-mono text-[10px] uppercase tracking-widest block mb-1";
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] items-start">
+      {/* shared autocomplete source for every stop input */}
+      <datalist id="mileage-places">
+        {places.map((p) => (
+          <option key={p.id} value={p.address}>{p.label || p.address}</option>
+        ))}
+      </datalist>
+
+      <div className="min-w-0 space-y-4">
+        {/* Entry */}
+        <section className="bg-white rounded-lg p-5 border-l-4" style={{ borderColor: SEA }}>
+          <div className="font-mono text-xs uppercase tracking-widest mb-4" style={{ color: SEA }}>
+            Trip entry
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 mb-3">
+            <label className="block">
+              <span className={cap} style={{ color: SEA }}>Date</span>
+              <input type="date" className={field} style={bc} value={date} onChange={(e) => setDate(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className={cap} style={{ color: SEA }}>Start address</span>
+              <input className={field} style={bc} list="mileage-places" value={startAddr} onChange={(e) => setStartAddr(e.target.value)} />
+            </label>
+          </div>
+
+          <span className={cap} style={{ color: SEA }}>Stops</span>
+          <div className="space-y-2 mb-2">
+            {stops.map((s, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="font-mono text-xs w-5 text-right shrink-0" style={{ color: "#8b9a9f" }}>{i + 1}</span>
+                <input
+                  className={field}
+                  style={bc}
+                  list="mileage-places"
+                  placeholder="Full address (saved places autocomplete)"
+                  value={s}
+                  onChange={(e) => setStop(i, e.target.value)}
+                />
+                <button onClick={() => removeStopField(i)} className="p-1.5 rounded hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Remove stop">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button onClick={addStopField} className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium mb-3" style={{ background: MIST, color: INK }}>
+            <Plus size={13} /> Add stop
+          </button>
+
+          <label className="flex items-center gap-2 rounded px-3 py-2 mb-4 cursor-pointer" style={{ background: MIST }}>
+            <input type="checkbox" checked={returnTrip} onChange={(e) => setReturnTrip(e.target.checked)} style={{ accentColor: SEA }} />
+            <span className="text-[15px]">Return to start (round trip)</span>
+          </label>
+
+          <button
+            onClick={calculate}
+            disabled={busy}
+            className="w-full py-2.5 rounded text-white text-[15px] font-medium disabled:opacity-60"
+            style={{ background: SEA }}
+          >
+            {busy ? "Calculating…" : "Calculate mileage"}
+          </button>
+          {error && (
+            <div className="mt-3 rounded p-2.5 text-sm" style={{ background: "#FBEAE8", color: TIDE, border: `1px solid ${TIDE}` }}>
+              {error}
+            </div>
+          )}
+        </section>
+
+        {/* Result */}
+        {result && (
+          <section className="bg-white rounded-lg overflow-hidden border-l-4" style={{ borderColor: "#C8B89A" }}>
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5" style={{ background: MIST }}>
+              <span className="font-mono text-xs" style={{ color: "#4a5a60" }}>{result.date}</span>
+              <span className="flex items-center gap-2">
+                <span className="font-mono text-sm font-bold px-2.5 py-1 rounded text-white" style={{ background: SEA }}>
+                  {result.totalMiles.toFixed(1)} mi
+                </span>
+                <span className="font-mono text-sm font-bold" style={{ color: "#2F5D50" }}>
+                  {fmtMoney(result.dollars)}
+                </span>
+              </span>
+            </div>
+            <table className="w-full text-[13px]">
+              <tbody>
+                {result.legs.map((l, i) => (
+                  <tr key={i} className="border-t" style={{ borderColor: "#eee9e2" }}>
+                    <td className="px-4 py-2" style={{ color: "#4a5a60" }}>{i + 1}. {l.from}</td>
+                    <td className="px-1 py-2" style={{ color: "#8b9a9f" }}>→</td>
+                    <td className="px-2 py-2" style={{ color: "#4a5a60" }}>{l.to}</td>
+                    <td className="px-2 py-2 text-right font-mono font-medium whitespace-nowrap">{l.miles.toFixed(1)} mi</td>
+                    <td className="px-4 py-2 text-right font-mono whitespace-nowrap" style={{ color: "#8b9a9f" }}>{l.minutes}m</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="px-4 py-3 border-t" style={{ borderColor: "#eee9e2" }}>
+              <button
+                onClick={saveToLog}
+                disabled={saved}
+                className="flex items-center gap-1.5 px-4 py-2 rounded text-white text-sm font-medium disabled:opacity-60"
+                style={{ background: saved ? "#2F5D50" : INK }}
+              >
+                {saved ? <><Check size={14} /> Saved to log</> : <><Plus size={14} /> Save to log</>}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* Log */}
+        {(trips || []).length > 0 && (
+          <section className="bg-white rounded-lg p-5 border-l-4" style={{ borderColor: SEA }}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-mono text-xs uppercase tracking-widest" style={{ color: SEA }}>Mileage log</span>
+              <button onClick={copyLog} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium" style={{ background: MIST, color: INK }} title="Copy as spreadsheet rows">
+                <Copy size={13} /> Copy for spreadsheet
+              </button>
+            </div>
+            <div className="space-y-3">
+              {logDates.map((d) => {
+                const sub = byDate[d].reduce((s, t) => s + t.totalMiles, 0);
+                return (
+                  <div key={d} className="rounded overflow-hidden" style={{ border: "1px solid #e5e0d8" }}>
+                    <div className="flex items-center justify-between px-3 py-2" style={{ background: MIST }}>
+                      <span className="font-mono text-xs font-bold">{d}</span>
+                      <span className="font-mono text-xs font-bold" style={{ color: SEA }}>
+                        {sub.toFixed(1)} mi · {fmtMoney(sub * rate)}
+                      </span>
+                    </div>
+                    {byDate[d].map((t) => (
+                      <div key={t.id} className="group flex items-center justify-between px-3 py-2 border-t" style={{ borderColor: "#eee9e2" }}>
+                        <span className="text-[13px] truncate pr-2" style={{ color: "#4a5a60" }}>
+                          {t.legs.length} leg{t.legs.length === 1 ? "" : "s"}: {(() => {
+                            // Destinations, minus the final return-home leg on round trips.
+                            const dests = t.legs.length > 1 ? t.legs.slice(0, -1).map((l) => l.to) : [t.legs[0]?.to];
+                            return dests.slice(0, 3).join(" · ") + (dests.length > 3 ? " …" : "");
+                          })()}
+                        </span>
+                        <span className="flex items-center gap-3 shrink-0">
+                          <span className="font-mono text-[13px] font-medium">{t.totalMiles.toFixed(1)} mi</span>
+                          <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(t.dollars)}</span>
+                          <button onClick={() => removeTrip(t)} className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-stone-100" style={{ color: TIDE }} title="Delete trip">
+                            <Trash2 size={13} />
+                          </button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center justify-between mt-3 rounded px-4 py-3" style={{ background: "#FBEAE8" }}>
+              <span className="font-mono text-xs uppercase tracking-widest" style={{ color: "#4a5a60" }}>Grand total</span>
+              <span className="font-mono text-base font-bold" style={{ color: SEA }}>
+                {grandMiles.toFixed(1)} mi · {fmtMoney(grandMiles * rate)}
+              </span>
+            </div>
+            <div className="font-mono text-[11px] mt-2" style={{ color: "#8b9a9f" }}>
+              Rate: ${rate.toFixed(2)}/mile (IRS standard)
+            </div>
+          </section>
+        )}
+      </div>
+
+      {/* Places rail */}
+      <aside className="bg-white rounded-lg p-4 border-l-4" style={{ borderColor: "#C8B89A" }}>
+        <div className="flex items-center gap-2 mb-3">
+          <MapPin size={16} style={{ color: SEA }} />
+          <span className="font-mono text-xs uppercase tracking-widest" style={{ color: SEA }}>Places</span>
+        </div>
+
+        <div className="rounded p-3 mb-3" style={{ background: MIST }}>
+          <div className="flex items-center gap-1.5 mb-2">
+            <Calendar size={13} style={{ color: SEA }} />
+            <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: "#4a5a60" }}>
+              Pull from my calendar
+            </span>
+          </div>
+          <div className="flex gap-2 mb-2">
+            <input type="date" className="flex-1 border rounded px-2 py-1.5 text-xs bg-white min-w-0" style={bc} value={scanStart} onChange={(e) => setScanStart(e.target.value)} />
+            <input type="date" className="flex-1 border rounded px-2 py-1.5 text-xs bg-white min-w-0" style={bc} value={scanEnd} onChange={(e) => setScanEnd(e.target.value)} />
+          </div>
+          <button onClick={scan} disabled={scanBusy} className="w-full py-1.5 rounded text-white text-xs font-medium disabled:opacity-60" style={{ background: INK }}>
+            {scanBusy ? "Scanning…" : "Scan events for addresses"}
+          </button>
+          {scanMsg && <div className="font-mono text-[11px] mt-2" style={{ color: "#4a5a60" }}>{scanMsg}</div>}
+        </div>
+
+        <ul className="space-y-1.5 max-h-[30rem] overflow-y-auto pr-1">
+          {places.map((p) => (
+            <li key={p.id} className="group">
+              <div className="flex items-start gap-1.5">
+                <button
+                  onClick={() => useAsStop(p.address)}
+                  className="starbot-wrap flex-1 min-w-0 text-left rounded p-2 hover:shadow-sm"
+                  style={{ background: MIST, border: "1px solid #e5e0d8" }}
+                  title="Add as next stop"
+                >
+                  {p.label && <div className="text-[13px] font-semibold leading-snug">{p.label}</div>}
+                  <div className="text-[12px] leading-snug" style={{ color: "#4a5a60" }}>{p.address}</div>
+                  <div className="font-mono text-[10px] mt-0.5" style={{ color: "#8b9a9f" }}>
+                    {newIds.has(p.id) && <span className="font-bold mr-1.5" style={{ color: SEA }}>NEW</span>}
+                    {p.timesUsed > 0 && `${p.timesUsed}× used`}
+                    {p.timesUsed > 0 && p.lastUsed && " · "}
+                    {p.lastUsed && `last ${p.lastUsed}`}
+                    {!p.timesUsed && !p.lastUsed && p.source === "calendar" && "from calendar"}
+                  </div>
+                </button>
+                <button onClick={() => removePlace(p)} className="p-1 mt-1 rounded opacity-0 group-hover:opacity-100 hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Delete place">
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            </li>
+          ))}
+          {places.length === 0 && (
+            <li className="text-xs text-center py-6 rounded" style={{ color: "#8b9a9f", border: "1px dashed #e5e0d8" }}>
+              No saved places yet. Scan your calendar above, or save a trip — its stops land here.
+            </li>
+          )}
+        </ul>
+        <div className="font-mono text-[10px] mt-3 leading-relaxed" style={{ color: "#8b9a9f" }}>
+          Click a place to add it as a stop. Stop fields also autocomplete from this list.
+        </div>
+      </aside>
+    </div>
+  );
+}

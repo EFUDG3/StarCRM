@@ -6,6 +6,19 @@ business-card scanning, multi-user profiles, and (in progress) a Claude connecto
 
 This file is the single source of truth for picking the project back up. Read it first.
 
+> **Mileage tab (2026-07-07).** Port of the standalone mileage-tracker-v2 into a tab:
+> `backend/mileage.py` + `frontend/src/Mileage.jsx` (`#mileage`). **Azure Maps** (account
+> `starbot-maps`, RG `starbot`, location `global`, Gen2) does geocoding + routing
+> server-side; key = container secret `azure-maps-key` / env `AZURE_MAPS_KEY` (also in
+> local `.env`). One multi-stop trip = ONE route transaction. Tables: `places` (per-user
+> address book, cached lat/lon so repeat sites never re-geocode; sources
+> manual/calendar/trip) and `trips` (legs JSON + total). Saving a trip upserts its stops
+> as places (office start excluded). "Scan events for addresses" = Graph calendarView
+> (location field + text body) → Haiku (`SCAN_MODEL`) extracts CA street addresses →
+> geocode-validated → saved. `MILEAGE_RATE` env ($/mile, default 0.70) drives the $
+> column. Decisions (Ethan): Azure Maps over MapQuest; places per-user only; clipboard
+> export + IRS-rate dollars; own calendar only.
+
 > **Resume note (2026-07-06, evening) — starbot phase 1 (in-app M365 chat) built + deploying.**
 > - **The product pivot:** this is now **starbot**, Star's company-wide internal AI assistant
 >   (Copilot-style chat over each user's OWN email/calendar/SharePoint via per-user M365

@@ -7,7 +7,7 @@ production if you want server-side date math.
 """
 import uuid
 
-from sqlalchemy import Boolean, Column, String, Text, DateTime, ForeignKey, func
+from sqlalchemy import Boolean, Column, Float, Integer, String, Text, DateTime, ForeignKey, func
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -27,6 +27,14 @@ def _user_id() -> str:
 
 def _todo_id() -> str:
     return "t" + uuid.uuid4().hex[:12]
+
+
+def _place_id() -> str:
+    return "p" + uuid.uuid4().hex[:12]
+
+
+def _trip_id() -> str:
+    return "tr" + uuid.uuid4().hex[:11]
 
 
 class User(Base):
@@ -53,6 +61,16 @@ class User(Base):
     )
     todos = relationship(
         "Todo",
+        back_populates="owner",
+        cascade="all, delete-orphan",
+    )
+    places = relationship(
+        "Place",
+        back_populates="owner",
+        cascade="all, delete-orphan",
+    )
+    trips = relationship(
+        "Trip",
         back_populates="owner",
         cascade="all, delete-orphan",
     )
@@ -123,3 +141,44 @@ class Todo(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     owner = relationship("User", back_populates="todos")
+
+
+class Place(Base):
+    """A saved address on a user's mileage tab — the self-building address book
+    of job sites. Sourced from calendar scans, manual adds, or saved trips.
+    Coordinates are cached so repeat visits never re-geocode."""
+
+    __tablename__ = "places"
+
+    id = Column(String, primary_key=True, default=_place_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    label = Column(String, default="")     # e.g. "Hernandez job — Chula Vista"
+    address = Column(String, nullable=False)
+    lat = Column(Float, nullable=True)
+    lon = Column(Float, nullable=True)
+    source = Column(String, default="manual")  # manual | calendar | trip
+    times_used = Column(Integer, nullable=False, default=0)
+    last_used = Column(String, default="")     # ISO date string
+    created_at = Column(DateTime, server_default=func.now())
+
+    owner = relationship("User", back_populates="places")
+
+
+class Trip(Base):
+    """One saved mileage calculation (a day's route). Legs are stored as the
+    JSON the routing endpoint returned: [{from, to, miles, minutes}]."""
+
+    __tablename__ = "trips"
+
+    id = Column(String, primary_key=True, default=_trip_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    date = Column(String, nullable=False)  # ISO date string
+    legs_json = Column(Text, nullable=False)
+    total_miles = Column(Float, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    owner = relationship("User", back_populates="trips")

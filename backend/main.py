@@ -25,6 +25,7 @@ import auth
 import cards
 import chat
 import m365
+import mileage
 import models  # noqa: F401 (ensures models are registered on Base)
 from database import Base, engine, get_db
 from models import Contact, Interaction, User
@@ -242,6 +243,7 @@ def health() -> dict:
 # X-User-Id header — the chat needs Graph tokens, which hang off the Microsoft
 # identity. The CRM board's existing routes are unchanged.
 app.include_router(m365.router)
+app.include_router(mileage.router)
 
 
 @app.post("/api/chat")

@@ -118,6 +118,22 @@ export const authLogout = () => sessionRequest("/api/auth/logout", { method: "PO
 // Sign-in is a full-page redirect (Microsoft login), not an XHR.
 export const authLoginUrl = () => `${BASE}/api/auth/login`;
 
+// --- Mileage tab -------------------------------------------------------------
+export const mileageRoute = (addresses) =>
+  sessionRequest("/api/mileage/route", { method: "POST", body: JSON.stringify({ addresses }) });
+export const listTrips = () => sessionRequest("/api/mileage/trips");
+export const saveTrip = (trip) =>
+  sessionRequest("/api/mileage/trips", { method: "POST", body: JSON.stringify(trip) });
+export const deleteTrip = (id) =>
+  sessionRequest(`/api/mileage/trips/${id}`, { method: "DELETE" });
+export const listPlaces = () => sessionRequest("/api/mileage/places");
+export const addPlace = (address, label = "") =>
+  sessionRequest("/api/mileage/places", { method: "POST", body: JSON.stringify({ address, label }) });
+export const deletePlace = (id) =>
+  sessionRequest(`/api/mileage/places/${id}`, { method: "DELETE" });
+export const scanCalendar = (start, end) =>
+  sessionRequest("/api/mileage/scan", { method: "POST", body: JSON.stringify({ start, end }) });
+
 export const listTodos = (includeDone = false) =>
   sessionRequest(`/api/todos${includeDone ? "?include_done=true" : ""}`);
 export const addTodo = (text, due = "", priority = "") =>

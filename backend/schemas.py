@@ -57,3 +57,29 @@ class TodoPatch(BaseModel):
     status: Optional[str] = None    # todo | in_progress | done
     priority: Optional[str] = None  # low | medium | high | "" clears it
     done: Optional[bool] = None     # legacy alias for status todo/done
+
+
+class RouteIn(BaseModel):
+    """Ordered addresses for one trip: start, stops…, end."""
+    addresses: list
+
+
+class TripIn(BaseModel):
+    """A calculated route being saved to the log. `legs` and `resolved` are
+    echoed from the /route response (resolved carries geocoded coords so
+    places save without re-geocoding)."""
+    date: str
+    legs: list
+    totalMiles: float
+    resolved: list = []
+
+
+class PlaceIn(BaseModel):
+    address: str
+    label: str = ""
+
+
+class ScanIn(BaseModel):
+    """Calendar scan window (ISO dates, inclusive)."""
+    start: str
+    end: str
