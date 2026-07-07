@@ -316,6 +316,16 @@ now definitively understood:
 
 ## Gotchas & lessons
 
+- **Secrets rotated 2026-07-07** (Neon password, Anthropic key, Entra client secret,
+  SESSION_SECRET). GCP Secret Manager got matching new versions so old Cloud Run heals
+  on cold start. Azure Maps key + the ACR registry secret needed no rotation.
+- **`&` in secret values truncates through az on Windows.** `az.cmd` re-parses args via
+  cmd.exe, so a connection string containing `&channel_binding=require` gets chopped at
+  the `&` and the secret stores silently truncated (app then crash-loops on boot). Fix:
+  invoke the CLI's Python directly — `& "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe"
+  -IBm azure.cli containerapp secret set ...` — which skips cmd parsing entirely. After
+  ANY secret write, compare stored vs intended length before restarting.
+
 - **Python 3.13, always.** 3.14 has no wheels for pydantic-core/pillow yet → Rust build
   failure. Activate the venv before `pip` (otherwise pip uses global 3.14).
 - **`DATABASE_URL` scheme** must be `postgresql+psycopg://`, not `postgresql://`.
