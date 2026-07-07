@@ -28,7 +28,7 @@ export default function MileageTracker() {
   const [me, setMe] = useState(null);
   const [places, setPlaces] = useState([]);
   const [newIds, setNewIds] = useState(new Set());
-  const [rate, setRate] = useState(0.7);
+  const [rate, setRate] = useState(null); // null = not loaded; user edits stick
   const [trips, setTrips] = useState(null); // null = loading
 
   const [date, setDate] = useState(todayISO());
@@ -55,7 +55,7 @@ export default function MileageTracker() {
       api.listTrips().catch(() => ({ rate: 0.7, trips: [] })),
     ]);
     setPlaces(pl);
-    setRate(tr.rate);
+    setRate((cur) => (cur == null ? tr.rate : cur)); // don't clobber a custom rate
     setTrips(tr.trips);
   };
 
@@ -150,17 +150,18 @@ export default function MileageTracker() {
   });
   const logDates = Object.keys(byDate).sort().reverse();
   const grandMiles = (trips || []).reduce((s, t) => s + t.totalMiles, 0);
+  const effRate = rate == null || Number.isNaN(rate) ? 0.7 : rate;
 
   const copyLog = () => {
     let text = "Date\tMiles\tAmount\n";
     logDates.slice().reverse().forEach((d) => {
       byDate[d].forEach((t) => {
-        text += `${t.date}\t${t.totalMiles.toFixed(1)}\t${t.dollars.toFixed(2)}\n`;
+        text += `${t.date}\t${t.totalMiles.toFixed(1)}\t${(t.totalMiles * effRate).toFixed(2)}\n`;
       });
       const sub = byDate[d].reduce((s, t) => s + t.totalMiles, 0);
-      text += `\tSubtotal ${sub.toFixed(1)} mi\t${(sub * rate).toFixed(2)}\n`;
+      text += `\tSubtotal ${sub.toFixed(1)} mi\t${(sub * effRate).toFixed(2)}\n`;
     });
-    text += `\nGrand total\t${grandMiles.toFixed(1)} mi\t${(grandMiles * rate).toFixed(2)}\n`;
+    text += `\nGrand total\t${grandMiles.toFixed(1)} mi\t${(grandMiles * effRate).toFixed(2)}\n`;
     navigator.clipboard.writeText(text).catch(() => {});
   };
 
@@ -271,7 +272,7 @@ export default function MileageTracker() {
                   {result.totalMiles.toFixed(1)} mi
                 </span>
                 <span className="font-mono text-sm font-bold" style={{ color: "#2F5D50" }}>
-                  {fmtMoney(result.dollars)}
+                  {fmtMoney(result.totalMiles * effRate)}
                 </span>
               </span>
             </div>
@@ -318,7 +319,7 @@ export default function MileageTracker() {
                     <div className="flex items-center justify-between px-3 py-2" style={{ background: MIST }}>
                       <span className="font-mono text-xs font-bold">{d}</span>
                       <span className="font-mono text-xs font-bold" style={{ color: SEA }}>
-                        {sub.toFixed(1)} mi · {fmtMoney(sub * rate)}
+                        {sub.toFixed(1)} mi · {fmtMoney(sub * effRate)}
                       </span>
                     </div>
                     {byDate[d].map((t) => (
@@ -332,7 +333,7 @@ export default function MileageTracker() {
                         </span>
                         <span className="flex items-center gap-3 shrink-0">
                           <span className="font-mono text-[13px] font-medium">{t.totalMiles.toFixed(1)} mi</span>
-                          <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(t.dollars)}</span>
+                          <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(t.totalMiles * effRate)}</span>
                           <button onClick={() => removeTrip(t)} className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-stone-100" style={{ color: TIDE }} title="Delete trip">
                             <Trash2 size={13} />
                           </button>
@@ -346,11 +347,28 @@ export default function MileageTracker() {
             <div className="flex items-center justify-between mt-3 rounded px-4 py-3" style={{ background: "#FBEAE8" }}>
               <span className="font-mono text-xs uppercase tracking-widest" style={{ color: "#4a5a60" }}>Grand total</span>
               <span className="font-mono text-base font-bold" style={{ color: SEA }}>
-                {grandMiles.toFixed(1)} mi · {fmtMoney(grandMiles * rate)}
+                {grandMiles.toFixed(1)} mi · {fmtMoney(grandMiles * effRate)}
               </span>
             </div>
-            <div className="font-mono text-[11px] mt-2" style={{ color: "#8b9a9f" }}>
-              Rate: ${rate.toFixed(2)}/mile (IRS standard)
+            <div className="flex items-center gap-2 font-mono text-[11px] mt-2" style={{ color: "#8b9a9f" }}>
+              <span>Rate: $</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={rate ?? 0.7}
+                onChange={(e) => setRate(parseFloat(e.target.value))}
+                className="w-20 border rounded px-2 py-1 text-[12px] font-mono"
+                style={{ borderColor: "#cdd6d4" }}
+                title="Reimbursement rate per mile — edit for special cases"
+              />
+              <span>/mile</span>
+              {Math.abs(effRate - 0.7) > 0.0001 && (
+                <button onClick={() => setRate(0.7)} className="underline" style={{ color: SEA }} title="Back to the IRS standard rate">
+                  reset to $0.70
+                </button>
+              )}
+              {Math.abs(effRate - 0.7) <= 0.0001 && <span>(IRS standard)</span>}
             </div>
           </section>
         )}
