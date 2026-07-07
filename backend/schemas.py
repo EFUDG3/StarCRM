@@ -67,10 +67,12 @@ class RouteIn(BaseModel):
 class TripIn(BaseModel):
     """A calculated route being saved to the log. `legs` and `resolved` are
     echoed from the /route response (resolved carries geocoded coords so
-    places save without re-geocoding)."""
+    places save without re-geocoding). `rate` is the $/mile chosen in the
+    entry form — stored on the trip."""
     date: str
     legs: list
     totalMiles: float
+    rate: float = 0.70
     resolved: list = []
 
 

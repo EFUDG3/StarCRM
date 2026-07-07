@@ -176,9 +176,12 @@ class Trip(Base):
     user_id = Column(
         String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    date = Column(String, nullable=False)  # ISO date string
+    date = Column(String, nullable=False)  # ISO date string (auto-stamped at save)
     legs_json = Column(Text, nullable=False)
     total_miles = Column(Float, nullable=False)
+    # $/mile chosen at entry time — stored per trip so a special-case rate
+    # (e.g. installer payments) never re-prices other entries in the log.
+    rate = Column(Float, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     owner = relationship("User", back_populates="trips")

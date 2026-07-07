@@ -31,7 +31,6 @@ export default function MileageTracker() {
   const [rate, setRate] = useState(null); // null = not loaded; user edits stick
   const [trips, setTrips] = useState(null); // null = loading
 
-  const [date, setDate] = useState(todayISO());
   const [startAddr, setStartAddr] = useState(OFFICE);
   const [stops, setStops] = useState([""]);
   const [returnTrip, setReturnTrip] = useState(true);
@@ -91,7 +90,7 @@ export default function MileageTracker() {
     setSaved(false);
     try {
       const r = await api.mileageRoute(addresses);
-      setResult({ ...r, date });
+      setResult({ ...r, date: todayISO() }); // date auto-attached, like CRM entries
     } catch (e) {
       setError(e.message || "Route failed.");
       setResult(null);
@@ -106,6 +105,7 @@ export default function MileageTracker() {
         date: result.date,
         legs: result.legs,
         totalMiles: result.totalMiles,
+        rate: effRate, // the entry-form rate rides with the trip
         resolved: result.resolved,
       });
       setSaved(true);
@@ -144,24 +144,24 @@ export default function MileageTracker() {
   };
 
   // --- Log helpers ------------------------------------------------------------
-  const byDate = {};
-  (trips || []).forEach((t) => {
-    (byDate[t.date] = byDate[t.date] || []).push(t);
-  });
-  const logDates = Object.keys(byDate).sort().reverse();
+  // Each saved entry stands alone (no day grouping): back-to-back saves can be
+  // different workers at different rates, so their totals must never merge.
+  // Dollars come from the server, priced at each trip's own stored rate.
   const grandMiles = (trips || []).reduce((s, t) => s + t.totalMiles, 0);
+  const grandDollars = (trips || []).reduce((s, t) => s + t.dollars, 0);
   const effRate = rate == null || Number.isNaN(rate) ? 0.7 : rate;
 
+  const legsSummary = (t) => {
+    const dests = t.legs.length > 1 ? t.legs.slice(0, -1).map((l) => l.to) : [t.legs[0]?.to];
+    return dests.slice(0, 3).join(" · ") + (dests.length > 3 ? " …" : "");
+  };
+
   const copyLog = () => {
-    let text = "Date\tMiles\tAmount\n";
-    logDates.slice().reverse().forEach((d) => {
-      byDate[d].forEach((t) => {
-        text += `${t.date}\t${t.totalMiles.toFixed(1)}\t${(t.totalMiles * effRate).toFixed(2)}\n`;
-      });
-      const sub = byDate[d].reduce((s, t) => s + t.totalMiles, 0);
-      text += `\tSubtotal ${sub.toFixed(1)} mi\t${(sub * effRate).toFixed(2)}\n`;
+    let text = "Date\tMiles\tRate\tAmount\n";
+    (trips || []).slice().reverse().forEach((t) => {
+      text += `${t.date}\t${t.totalMiles.toFixed(1)}\t${t.rate.toFixed(2)}\t${t.dollars.toFixed(2)}\n`;
     });
-    text += `\nGrand total\t${grandMiles.toFixed(1)} mi\t${(grandMiles * effRate).toFixed(2)}\n`;
+    text += `\nGrand total\t${grandMiles.toFixed(1)} mi\t\t${grandDollars.toFixed(2)}\n`;
     navigator.clipboard.writeText(text).catch(() => {});
   };
 
@@ -210,8 +210,14 @@ export default function MileageTracker() {
           </div>
           <div className="grid gap-3 sm:grid-cols-2 mb-3">
             <label className="block">
-              <span className={cap} style={{ color: SEA }}>Date</span>
-              <input type="date" className={field} style={bc} value={date} onChange={(e) => setDate(e.target.value)} />
+              <span className={cap} style={{ color: SEA }}>Rate ($/mile)</span>
+              <input
+                type="number" step="0.01" min="0.01" max="5"
+                className={field} style={bc}
+                value={rate ?? 0.7}
+                onChange={(e) => setRate(parseFloat(e.target.value))}
+                title="Reimbursement rate for THIS entry — saved with the trip. Default $0.70 (IRS standard)."
+              />
             </label>
             <label className="block">
               <span className={cap} style={{ color: SEA }}>Start address</span>
@@ -311,64 +317,36 @@ export default function MileageTracker() {
                 <Copy size={13} /> Copy for spreadsheet
               </button>
             </div>
-            <div className="space-y-3">
-              {logDates.map((d) => {
-                const sub = byDate[d].reduce((s, t) => s + t.totalMiles, 0);
-                return (
-                  <div key={d} className="rounded overflow-hidden" style={{ border: "1px solid #e5e0d8" }}>
-                    <div className="flex items-center justify-between px-3 py-2" style={{ background: MIST }}>
-                      <span className="font-mono text-xs font-bold">{d}</span>
-                      <span className="font-mono text-xs font-bold" style={{ color: SEA }}>
-                        {sub.toFixed(1)} mi · {fmtMoney(sub * effRate)}
+            <div className="space-y-2">
+              {(trips || []).map((t) => (
+                <div key={t.id} className="group rounded px-3 py-2" style={{ border: "1px solid #e5e0d8" }}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-baseline gap-3 min-w-0">
+                      <span className="font-mono text-xs font-bold shrink-0">{t.date}</span>
+                      <span className="text-[13px] truncate" style={{ color: "#4a5a60" }}>
+                        {t.legs.length} leg{t.legs.length === 1 ? "" : "s"}: {legsSummary(t)}
                       </span>
-                    </div>
-                    {byDate[d].map((t) => (
-                      <div key={t.id} className="group flex items-center justify-between px-3 py-2 border-t" style={{ borderColor: "#eee9e2" }}>
-                        <span className="text-[13px] truncate pr-2" style={{ color: "#4a5a60" }}>
-                          {t.legs.length} leg{t.legs.length === 1 ? "" : "s"}: {(() => {
-                            // Destinations, minus the final return-home leg on round trips.
-                            const dests = t.legs.length > 1 ? t.legs.slice(0, -1).map((l) => l.to) : [t.legs[0]?.to];
-                            return dests.slice(0, 3).join(" · ") + (dests.length > 3 ? " …" : "");
-                          })()}
-                        </span>
-                        <span className="flex items-center gap-3 shrink-0">
-                          <span className="font-mono text-[13px] font-medium">{t.totalMiles.toFixed(1)} mi</span>
-                          <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(t.totalMiles * effRate)}</span>
-                          <button onClick={() => removeTrip(t)} className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-stone-100" style={{ color: TIDE }} title="Delete trip">
-                            <Trash2 size={13} />
-                          </button>
-                        </span>
-                      </div>
-                    ))}
+                    </span>
+                    <span className="flex items-center gap-3 shrink-0">
+                      <span className="font-mono text-[13px] font-medium">{t.totalMiles.toFixed(1)} mi</span>
+                      <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(t.dollars)}</span>
+                      <span className="font-mono text-[11px]" style={{ color: "#8b9a9f" }}>@ ${t.rate.toFixed(2)}</span>
+                      <button onClick={() => removeTrip(t)} className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-stone-100" style={{ color: TIDE }} title="Delete entry">
+                        <Trash2 size={13} />
+                      </button>
+                    </span>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
             <div className="flex items-center justify-between mt-3 rounded px-4 py-3" style={{ background: "#FBEAE8" }}>
               <span className="font-mono text-xs uppercase tracking-widest" style={{ color: "#4a5a60" }}>Grand total</span>
               <span className="font-mono text-base font-bold" style={{ color: SEA }}>
-                {grandMiles.toFixed(1)} mi · {fmtMoney(grandMiles * effRate)}
+                {grandMiles.toFixed(1)} mi · {fmtMoney(grandDollars)}
               </span>
             </div>
-            <div className="flex items-center gap-2 font-mono text-[11px] mt-2" style={{ color: "#8b9a9f" }}>
-              <span>Rate: $</span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={rate ?? 0.7}
-                onChange={(e) => setRate(parseFloat(e.target.value))}
-                className="w-20 border rounded px-2 py-1 text-[12px] font-mono"
-                style={{ borderColor: "#cdd6d4" }}
-                title="Reimbursement rate per mile — edit for special cases"
-              />
-              <span>/mile</span>
-              {Math.abs(effRate - 0.7) > 0.0001 && (
-                <button onClick={() => setRate(0.7)} className="underline" style={{ color: SEA }} title="Back to the IRS standard rate">
-                  reset to $0.70
-                </button>
-              )}
-              {Math.abs(effRate - 0.7) <= 0.0001 && <span>(IRS standard)</span>}
+            <div className="font-mono text-[11px] mt-2" style={{ color: "#8b9a9f" }}>
+              Each entry keeps the rate it was saved with — set the rate in the trip form before calculating.
             </div>
           </section>
         )}

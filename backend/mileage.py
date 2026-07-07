@@ -116,12 +116,14 @@ def _ser_place(p: Place) -> dict:
 
 def _ser_trip(t: Trip) -> dict:
     legs = json.loads(t.legs_json)
+    rate = t.rate if t.rate is not None else MILEAGE_RATE
     return {
         "id": t.id,
         "date": t.date,
         "legs": legs,
         "totalMiles": t.total_miles,
-        "dollars": round(t.total_miles * MILEAGE_RATE, 2),
+        "rate": round(rate, 2),
+        "dollars": round(t.total_miles * rate, 2),
     }
 
 
@@ -201,11 +203,14 @@ def save_trip(
 ) -> dict:
     if not payload.legs:
         raise HTTPException(status_code=400, detail="No legs to save")
+    if not (0 < payload.rate <= 5):
+        raise HTTPException(status_code=400, detail="Rate must be between $0 and $5 per mile")
     trip = Trip(
         user_id=user.id,
         date=payload.date or "",
         legs_json=json.dumps(payload.legs),
         total_miles=round(float(payload.totalMiles), 1),
+        rate=round(float(payload.rate), 2),
     )
     db.add(trip)
     # Every visited stop becomes/updates a saved place — the office itself is

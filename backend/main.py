@@ -66,6 +66,10 @@ def _ensure_schema() -> None:
         conn.execute(text("ALTER TABLE todos ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'todo'"))
         conn.execute(text("ALTER TABLE todos ADD COLUMN IF NOT EXISTS priority VARCHAR"))
         conn.execute(text("UPDATE todos SET status = 'done' WHERE done = TRUE AND status = 'todo'"))
+        # Mileage: per-trip reimbursement rate (entry-time choice). Additive;
+        # pre-existing trips backfill to the IRS standard.
+        conn.execute(text("ALTER TABLE trips ADD COLUMN IF NOT EXISTS rate DOUBLE PRECISION"))
+        conn.execute(text("UPDATE trips SET rate = 0.70 WHERE rate IS NULL"))
 
 
 _ensure_schema()
