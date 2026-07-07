@@ -10,6 +10,7 @@ module never uses application permissions.
 """
 import html
 import re
+import time
 from typing import Any
 
 import httpx
@@ -29,11 +30,18 @@ class GraphError(Exception):
 
 
 def _request(token: str, method: str, path: str, *, params: dict | None = None,
-             json: dict | None = None, headers: dict | None = None) -> dict:
+             json: dict | None = None, headers: dict | None = None,
+             _retried: bool = False) -> dict:
     hdrs = {"Authorization": f"Bearer {token}", **(headers or {})}
     resp = httpx.request(
         method, f"{GRAPH}{path}", params=params, json=json, headers=hdrs, timeout=_TIMEOUT
     )
+    # Graph (especially /search/query) throws occasional transient 5xxs; one
+    # short retry absorbs almost all of them instead of failing the tool call.
+    if resp.status_code >= 500 and not _retried:
+        time.sleep(1.5)
+        return _request(token, method, path, params=params, json=json,
+                        headers=headers, _retried=True)
     if resp.status_code >= 400:
         detail = ""
         try:
@@ -178,6 +186,10 @@ def list_calendar_events(token: str, start: str, end: str, top: int = 50) -> lis
 
 def search_files(token: str, query: str, top: int = 10) -> list[dict]:
     """Search SharePoint + OneDrive (driveItem) the user can access."""
+    if not (query or "").strip():
+        # Graph 400s on an empty queryString; give the model a fixable message.
+        raise GraphError(400, "search_files needs a non-empty query — pass the "
+                              "keywords to look for, e.g. 'flood restoration SOP'")
     data = _request(
         token, "POST", "/search/query",
         json={
