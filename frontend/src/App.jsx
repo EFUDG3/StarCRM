@@ -59,6 +59,10 @@ export default function StarCRM() {
       : window.location.hash === "#tasks" ? "tasks"
       : "board"
   );
+  // Company gate: the whole app requires a Microsoft sign-in (me.signedIn).
+  // null = still checking. When M365 login isn't configured (local dev without
+  // the client secret), the gate is skipped and the legacy profile model runs.
+  const [me, setMe] = useState(null);
   const [contacts, setContacts] = useState(null); // null = loading
   const [users, setUsers] = useState([]);
   const [userId, setUserId] = useState(null);
@@ -78,14 +82,23 @@ export default function StarCRM() {
     return data;
   };
 
-  // Initial load: pick the active user (stored or first), then load their board.
+  // Session probe runs first — everything else waits for it.
   useEffect(() => {
+    api.authMe().then(setMe).catch(() => setMe({ signedIn: false, configured: true }));
+  }, []);
+
+  const authed = me != null && (me.signedIn || !me.configured);
+
+  // Once signed in: pick the active profile and load their board. Default is
+  // the signed-in user's OWN profile (not the first row, which was Bob).
+  useEffect(() => {
+    if (!authed) return;
     (async () => {
       try {
         const us = await api.listUsers();
         let id = api.getCurrentUser();
         if (!us.find((u) => u.id === id)) {
-          id = us[0]?.id || null;
+          id = (me.userId && us.find((u) => u.id === me.userId)) ? me.userId : (us[0]?.id || null);
           api.setCurrentUser(id);
         }
         setUsers(us);
@@ -97,7 +110,7 @@ export default function StarCRM() {
         setContacts([]);
       }
     })();
-  }, []);
+  }, [authed]);
 
   // Back button: when the add/edit form or a contact's detail is open, the
   // browser/phone Back button closes it and returns to the list instead of
@@ -287,6 +300,50 @@ export default function StarCRM() {
     window.history.replaceState(null, "", hash);
   };
 
+  if (me === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: MIST }}>
+        <div className="font-mono text-sm tracking-widest uppercase" style={{ color: SEA }}>Checking sign-in…</div>
+      </div>
+    );
+  }
+
+  // The company gate: no Microsoft session, no app. Customers who stumble on
+  // the URL see only this card; sign-in requires a Star tenant account.
+  if (me.configured && !me.signedIn) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: MIST, color: INK }}>
+        <section className="bg-white rounded-lg p-10 text-center border-l-4 max-w-md w-full shadow-sm" style={{ borderColor: SEA }}>
+          <div className="text-5xl mb-3" style={{ color: SEA }}>★</div>
+          <h1 className="text-3xl font-bold tracking-tight mb-1" style={{ fontFamily: "Georgia, serif" }}>Starbot</h1>
+          <div className="font-mono text-xs tracking-[0.25em] uppercase mb-5" style={{ color: SEA }}>
+            Star Flooring &amp; Remodeling
+          </div>
+          <p className="text-[15px] mb-6" style={{ color: "#4a5a60" }}>
+            The internal assistant for the Star team: email triage, task boards,
+            and the relationship CRM. Sign in with your company account.
+          </p>
+          <a
+            href={api.authLoginUrl()}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded text-white text-base font-medium"
+            style={{ background: INK }}
+          >
+            <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true">
+              <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+              <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+              <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+              <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+            </svg>
+            Sign in with Microsoft
+          </a>
+          <div className="font-mono text-[11px] mt-5" style={{ color: "#8b9a9f" }}>
+            Star Flooring company accounts only
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   if (!contacts && view === "board") {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: MIST }}>
@@ -297,7 +354,14 @@ export default function StarCRM() {
 
   return (
     <div className="min-h-screen" style={{ background: MIST, color: INK }}>
-      <div className="max-w-5xl mx-auto px-4 py-6">
+      {/* Chat + Tasks reclaim half the side whitespace on wide screens; the
+          CRM board keeps the tighter column so contact rows don't stretch. */}
+      <div
+        className={
+          (view === "board" ? "max-w-5xl" : "max-w-5xl lg:max-w-[calc(64rem+(100vw-64rem)/2)]") +
+          " mx-auto px-4 py-6"
+        }
+      >
 
         {/* Header */}
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-6 border-b-2 pb-4" style={{ borderColor: INK }}>
@@ -307,7 +371,7 @@ export default function StarCRM() {
                 {view === "chat" ? "AI assistant" : view === "tasks" ? "Task board" : "Relationship board"}
               </div>
               <h1 className="text-3xl font-bold tracking-tight" style={{ fontFamily: "Georgia, serif" }}>
-                <span style={{ color: SEA }}>★</span> {view === "chat" ? "starbot" : view === "tasks" ? "Star Tasks" : "Star CRM"}
+                <span style={{ color: SEA }}>★</span> {view === "chat" ? "Starbot" : view === "tasks" ? "Star Tasks" : "Star CRM"}
               </h1>
             </div>
             <div className="flex rounded overflow-hidden" style={{ border: "1px solid #cdd6d4" }}>

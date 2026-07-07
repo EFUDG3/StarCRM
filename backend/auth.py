@@ -63,8 +63,10 @@ def validate_entra_token(token: str) -> dict:
 
 
 def user_from_claims(claims: dict, db: Session) -> User:
-    """Map a validated token's claims to a CRM profile, creating one on first
-    sign-in (keyed by the immutable Entra object id)."""
+    """Map a validated token's claims to a CRM profile, keyed by the immutable
+    Entra object id. On first sign-in, attach to a pre-created profile whose
+    email matches (so Bob/Salam land on their existing boards instead of
+    getting duplicates); only create a brand-new profile when nothing matches."""
     oid = claims.get("oid") or claims.get("sub")
     if not oid:
         raise HTTPException(status_code=401, detail="Token has no user identifier")
@@ -72,6 +74,17 @@ def user_from_claims(claims: dict, db: Session) -> User:
     name = claims.get("name") or email or "M365 user"
 
     user = db.query(User).filter(User.microsoft_oid == oid).first()
+    if user is None and email:
+        # First sign-in: link by email to an unlinked, pre-created profile.
+        user = (
+            db.query(User)
+            .filter(User.microsoft_oid.is_(None), User.email.ilike(email))
+            .first()
+        )
+        if user is not None:
+            user.microsoft_oid = oid
+            db.commit()
+            db.refresh(user)
     if user is None:
         user = User(name=name, microsoft_oid=oid, email=email)
         db.add(user)

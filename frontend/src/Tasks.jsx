@@ -199,7 +199,7 @@ export default function TaskBoard() {
                     }}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="text-sm leading-snug min-w-0" style={{ textDecoration: t.status === "done" ? "line-through" : "none" }}>
+                      <div className="text-[15px] leading-snug min-w-0" style={{ textDecoration: t.status === "done" ? "line-through" : "none" }}>
                         {t.text}
                       </div>
                       <button onClick={() => remove(t)} title="Delete" className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-white shrink-0" style={{ color: TIDE }}>

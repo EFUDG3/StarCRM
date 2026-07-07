@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import date as date_cls
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Cookie, Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -174,15 +174,29 @@ def load_seed(db: Session, user: User) -> None:
 def get_current_user(
     authorization: str | None = Header(default=None),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    starbot_session: str | None = Cookie(default=None, alias=m365.SESSION_COOKIE),
     db: Session = Depends(get_db),
 ) -> User:
-    """Resolve the active user. Prefers an Entra Bearer token (web SSO / the
-    Claude connector) when Entra is configured; otherwise falls back to the
-    X-User-Id profile header (the current no-auth model), so nothing breaks
-    while auth is being rolled out."""
+    """Resolve the active user. Three doors, in order:
+
+    1. Entra Bearer token — the Claude MCP connector.
+    2. Microsoft session cookie — the browser. This is the COMPANY GATE: once
+       M365 login is configured, nobody reaches CRM data without signing in
+       with a Star account. A signed-in user may still pass X-User-Id to view
+       another profile's board (the profile switcher).
+    3. Bare X-User-Id — dev fallback, only when M365 login isn't configured.
+    """
     if auth.ENTRA_ENABLED and authorization and authorization.lower().startswith("bearer "):
         claims = auth.validate_entra_token(authorization.split(" ", 1)[1])
         return auth.user_from_claims(claims, db)
+    if m365.M365_LOGIN_ENABLED:
+        session_user = m365.get_session_user(starbot_session, db)  # 401 if not signed in
+        if x_user_id:
+            user = db.get(User, x_user_id)
+            if user is None:
+                raise HTTPException(status_code=404, detail="User not found")
+            return user
+        return session_user
     if x_user_id:
         user = db.get(User, x_user_id)
         if user is None:
@@ -301,15 +315,21 @@ def remove_todo(
         raise HTTPException(status_code=404, detail="To-do not found")
 
 
-# --- Users (no auth — just selectable profiles) ----------------------------
+# --- Users (selectable profiles; gated behind the company sign-in) ----------
 @app.get("/api/users")
-def list_users(db: Session = Depends(get_db)) -> list:
+def list_users(
+    _viewer: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list:
     users = db.query(User).order_by(User.created_at).all()
     return [{"id": u.id, "name": u.name} for u in users]
 
 
 @app.post("/api/users", status_code=201)
-def create_user(payload: UserIn, db: Session = Depends(get_db)) -> dict:
+def create_user(
+    payload: UserIn,
+    _viewer: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Name is required")
@@ -321,7 +341,12 @@ def create_user(payload: UserIn, db: Session = Depends(get_db)) -> dict:
 
 
 @app.patch("/api/users/{user_id}")
-def rename_user(user_id: str, payload: UserIn, db: Session = Depends(get_db)) -> dict:
+def rename_user(
+    user_id: str,
+    payload: UserIn,
+    _viewer: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -334,7 +359,11 @@ def rename_user(user_id: str, payload: UserIn, db: Session = Depends(get_db)) ->
 
 
 @app.delete("/api/users/{user_id}", status_code=204)
-def delete_user(user_id: str, db: Session = Depends(get_db)) -> None:
+def delete_user(
+    user_id: str,
+    _viewer: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")

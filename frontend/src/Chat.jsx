@@ -28,6 +28,7 @@ const TOOL_LABELS = {
   list_todos: { icon: ListTodo, label: "Checking your to-do list" },
   add_todos: { icon: ListTodo, label: "Adding to-dos" },
   complete_todo: { icon: ListTodo, label: "Updating a to-do" },
+  update_todo: { icon: ListTodo, label: "Updating a task" },
   delete_todo: { icon: ListTodo, label: "Removing a to-do" },
   search_crm_contacts: { icon: Users, label: "Searching CRM contacts" },
   get_crm_contact: { icon: Users, label: "Reading a CRM contact" },
@@ -137,9 +138,9 @@ export default function StarbotChat() {
 
   const signOut = async () => {
     await api.authLogout().catch(() => {});
-    setMe({ signedIn: false, configured: true });
-    setChat({ api: [], ui: [] });
     sessionStorage.removeItem(CHAT_KEY);
+    // Full reload so the app-level sign-in gate takes over everywhere.
+    window.location.href = "/";
   };
 
   const addTodoManual = async () => {
@@ -214,12 +215,12 @@ export default function StarbotChat() {
 
   // --- Signed in: chat + to-do rail ----------------------------------------
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_20rem] items-start">
+    <div className="grid gap-4 lg:grid-cols-[1fr_20rem] xl:grid-cols-[1fr_24rem] items-start">
       {/* Chat column */}
       <section className="bg-white rounded-lg border-l-4 flex flex-col" style={{ borderColor: SEA, height: "calc(100vh - 14rem)", minHeight: "28rem" }}>
         <div className="flex items-center justify-between px-4 py-2.5 border-b" style={{ borderColor: "#eee9e2" }}>
           <div className="font-mono text-xs uppercase tracking-widest" style={{ color: SEA }}>
-            ★ starbot · {me.name}
+            ★ Starbot · {me.name}
           </div>
           <div className="flex items-center gap-1">
             <button onClick={clearChat} title="New conversation" className="p-1.5 rounded hover:bg-stone-100" style={{ color: INK }}>
@@ -255,13 +256,13 @@ export default function StarbotChat() {
           {chat.ui.map((m, i) =>
             m.role === "user" ? (
               <div key={i} className="flex justify-end">
-                <div className="max-w-[85%] rounded-lg px-3.5 py-2 text-sm text-white whitespace-pre-wrap" style={{ background: INK }}>
+                <div className="max-w-[85%] rounded-lg px-3.5 py-2 text-[15px] text-white whitespace-pre-wrap" style={{ background: INK }}>
                   {m.text}
                 </div>
               </div>
             ) : (
               <div key={i} className="flex justify-start">
-                <div className="max-w-[95%] min-w-0 text-sm">
+                <div className="max-w-[95%] min-w-0 text-[15px]">
                   {m.tools?.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mb-1.5">
                       {m.tools.map((name, j) => {
@@ -319,7 +320,7 @@ export default function StarbotChat() {
             }}
             rows={1}
             placeholder="Ask starbot… (Enter to send, Shift+Enter for a new line)"
-            className="flex-1 border rounded px-3 py-2 text-sm bg-white resize-none"
+            className="flex-1 border rounded px-3 py-2 text-[15px] bg-white resize-none"
             style={{ borderColor: "#cdd6d4" }}
           />
           {busy ? (
@@ -365,7 +366,7 @@ export default function StarbotChat() {
                 {t.done && <Check size={11} color="white" />}
               </button>
               <div className="min-w-0 flex-1">
-                <div className="text-sm leading-snug" style={{ textDecoration: t.done ? "line-through" : "none", color: t.done ? "#8b9a9f" : INK }}>
+                <div className="text-[15px] leading-snug" style={{ textDecoration: t.done ? "line-through" : "none", color: t.done ? "#8b9a9f" : INK }}>
                   {t.text}
                 </div>
                 <div className="font-mono text-[10px] mt-0.5" style={{ color: "#8b9a9f" }}>
