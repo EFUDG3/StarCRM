@@ -393,8 +393,12 @@ who owns what and what to check first.
 **The thing most likely to break unattended: the Entra client secret.** Entra client
 secrets EXPIRE. When a secret expires, the thing using it silently stops working (the
 CRM board is unaffected). Use the longest expiry (or a certificate) and record it here:
-- `starbot-chat` (M365 sign-in for the chat tab) expires: **2028-07-06**
-- `OauthForStarCRM` (Claude connector) expires: **2028-06-29**
+- `starbot-login-2026-07` (M365 sign-in, all tabs) expires: **2028-07-09**. Created
+  2026-07-09 after discovering the 7/7-rotation secret (`starbot-chat`) had been
+  DELETED from Entra (the wrong secret was removed during rotation cleanup — the
+  intended-for-deletion `OauthForStarCRM` survived). Symptom was AADSTS7000215 on
+  every fresh sign-in; existing session cookies masked it on the old URL.
+- `OauthForStarCRM` (Claude connector) expires: **2028-06-29** — still present in Entra.
 - Rotate: Entra → app `066b737b-…` → Certificates & secrets → new client secret → copy the
   **Value** → paste into the Claude connector settings.
 
