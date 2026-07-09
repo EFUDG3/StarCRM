@@ -15,45 +15,65 @@ This file is the single source of truth for picking the project back up. Read it
 > manual/calendar/trip) and `trips` (legs JSON + total). Saving a trip upserts its stops
 > as places (office start excluded). "Scan events for addresses" = Graph calendarView
 > (location field + text body) → Haiku (`SCAN_MODEL`) extracts CA street addresses →
-> geocode-validated → saved. `MILEAGE_RATE` env ($/mile, default 0.70) drives the $
-> column. Decisions (Ethan): Azure Maps over MapQuest; places per-user only; clipboard
-> export + IRS-rate dollars; own calendar only.
+> geocode-validated → saved (~1¢/scan; Graph+Maps cost no Claude credits). **Rate is
+> per-entry:** chosen in the trip form (default `MILEAGE_RATE` env, 0.70), STORED on each
+> trip (`trips.rate`) — a special-case rate never re-prices other entries. Date
+> auto-stamps at save. **Log = flat rows, one per save, NO day grouping and NO grand
+> total** (back-to-back saves can be different workers → rollups are meaningless); each
+> row expands (chevron) to show start + every destination w/ per-leg miles. Decisions
+> (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
+> + Rate columns; own calendar only.
 
-> **Resume note (2026-07-06, evening) — starbot phase 1 (in-app M365 chat) built + deploying.**
-> - **The product pivot:** this is now **starbot**, Star's company-wide internal AI assistant
->   (Copilot-style chat over each user's OWN email/calendar/SharePoint via per-user M365
->   OAuth), with the CRM as one tab. Owner (Salam) requirements — from the cancelled Data Net
->   "Starbot" project: (1) query email/OneDrive/SharePoint/docs, (2) review emails + draft
->   replies, (3) organize/flag action items, (4) to-do lists + reminders; plus persistent
->   context workspaces and doc-generation-from-templates later. Phase 1 demo features chosen:
->   **to-do list from email/calendar** and **inbox triage** (search+citations and drafting come
->   free with the same tools). On-demand only — NO background processing, no stored automation.
-> - **Phase 1 code (committed `ab1c425`):** `backend/m365.py` (server-side OAuth: MSAL
->   confidential client, `/api/auth/login|callback|me|logout`, signed-JWT session cookie,
->   per-user Graph token cache in `users.m365_token_cache`); `backend/graph.py` (mail
->   search/read, inbox list, calendarView Pacific, SharePoint/OneDrive `/search/query`);
->   `backend/chat.py` (Claude agent loop over SSE at `POST /api/chat`, 11 tools incl. todos +
->   CRM op_*); todos table + REST; `frontend/src/Chat.jsx` + Starbot/Board tabs (`#starbot`).
->   Client holds the chat history (server stateless); CHAT_MODEL defaults claude-sonnet-4-6.
-> - **Entra app `066b737b` configured today via az:** redirect URIs ADDED (kept claude.ai +
->   run.app ones): `https://starbot.ashymoss-2b719eff.westus3.azurecontainerapps.io/api/auth/callback`
->   and `http://localhost:8000/api/auth/callback`; delegated Graph scopes Mail.Read,
->   Calendars.Read, Sites.Read.All, Files.Read.All (+User.Read) with tenant **admin consent
->   granted**; `requestedAccessTokenVersion: 2` set (was null — this was connector open item);
->   new client secret **"starbot-chat", expires 2028-07-06** → Container Apps secret
->   `entra-client-secret` + local `backend/.env`.
-> - **Container app env FIXED (the old plaintext-env problem):** secrets `database-url`,
->   `anthropic-api-key`, `entra-client-secret`, `session-secret` all set, env vars use
->   `secretref:`; plus `ENTRA_TENANT_ID/CLIENT_ID/AUDIENCE`, `PUBLIC_BASE_URL`,
->   `MCP_RESOURCE_URL` (both pointing at the azurecontainerapps.io https origin). Remember:
->   `--set-env-vars` takes each `key=value` as its OWN quoted token, never one big string.
-> - **KEY FACT: DNS blocks ONLY the Claude MCP connector** (Entra App ID URIs need a verified
->   domain). In-app M365 sign-in works on the azurecontainerapps.io host — redirect URIs have
->   no verified-domain rule. So the chat is fully usable while DNS waits on DataNet/boss.
-> - **Secret rotation: deferred by owner decision (2026-07-06)** while only Ethan + one
->   coworker have access. HARD GATE before the first non-IT user signs in: rotate the Neon
->   password + Anthropic key (both were pasted in chat/logs historically). New secrets from
->   today were never displayed (created via az → variables → secret store).
+> **Resume note (2026-07-07, latest) — starbot LIVE on Azure: 4 tabs, company-gated, secrets rotated.**
+> - **What starbot is:** Star's company-wide internal AI assistant (Copilot-style chat over
+>   each user's OWN email/calendar/SharePoint via per-user M365 OAuth). Owner (Salam)
+>   requirements from the cancelled Data Net project: (1) query email/OneDrive/SharePoint/
+>   docs, (2) review emails + draft replies, (3) organize/flag action items, (4) to-do
+>   lists + reminders; later: persistent context workspaces, doc-gen from templates.
+>   On-demand only — NO background processing.
+> - **Live:** https://starbot.ashymoss-2b719eff.westus3.azurecontainerapps.io — Container
+>   App `starbot`, RG `starbot`, westus3. Deploy = `az acr build --registry cadd18599bd0acr
+>   --image starbot:TAG .` then `az containerapp update -n starbot -g starbot --image
+>   cadd18599bd0acr.azurecr.io/starbot:TAG`. Old **Cloud Run star-crm kept alive** for now
+>   (its GCP secrets were synced to the rotated values; retire when everyone's on Azure).
+> - **Four tabs, one SPA** (App.jsx swaps components): **Starbot** chat (`#starbot`,
+>   Chat.jsx — SSE agent loop, 12 tools incl. email/calendar/files/todos/CRM, citations
+>   with webLinks), **Tasks** (`#tasks`, Tasks.jsx — kanban todo/in_progress/done +
+>   priority flags, drag-and-drop; same `todos` table as the chat rail), **Mileage**
+>   (`#mileage`, block above), **Board** (the CRM).
+> - **Company gate:** Microsoft sign-in required for EVERYTHING (full-page landing).
+>   `get_current_user` in main.py has three doors: Entra Bearer (Claude connector),
+>   session cookie (browser; X-User-Id then only picks which profile to view), bare
+>   X-User-Id ONLY when Entra env is unset (local dev). First sign-in links to an existing
+>   unlinked profile **by email** (auth.user_from_claims) — Bob/Salam pre-mapped to
+>   bob@/salam@starflooringandremodeling.com; Ethan's OAuth duplicate was merged into the
+>   original profile `u2886afa72cb7`. Users land on their OWN board, not Bob's.
+> - **Chat runs on Haiku** (`CHAT_MODEL=claude-haiku-4-5` env var; code default sonnet-4-6)
+>   with prompt caching (cache_control on system block + last message; cached reads don't
+>   count toward rate limits), history trim (~30 msgs), read_email caps (4k chars, max
+>   3/round), friendly 429 messages. **Org rate limits are LOW** (legacy tier, ~10k
+>   ITPM Sonnet, ~$4.50 credit): the fix is buying credit / requesting an increase at
+>   console.anthropic.com/settings/limits. Watch for it during demos; new-conversation
+>   button helps (smaller cache writes).
+> - **Secrets ALL ROTATED 2026-07-07** (Neon pw, Anthropic key, Entra client secret,
+>   SESSION_SECRET; Azure Maps key + ACR registry secret didn't need it). Old Entra secret
+>   `OauthForStarCRM` deleted by Ethan. GCP Secret Manager got matching versions. See
+>   Gotchas for the `&`-truncation trap that briefly took prod down during rotation.
+>   Handling rule stands: secrets move az→variable→secret store or portal-paste, never
+>   chat/inline; verify stored length after every write.
+> - **Entra app `066b737b`:** redirect URIs for azurecontainerapps.io + localhost:8000
+>   callbacks (claude.ai + run.app ones kept); delegated Graph scopes Mail.Read,
+>   Calendars.Read, Sites.Read.All, Files.Read.All (+User.Read), tenant admin consent
+>   granted; `requestedAccessTokenVersion: 2`. Container env vars all use `secretref:`.
+> - **DNS records SENT to the DNS host (pending confirmation):** CNAME `starbot` →
+>   `starbot.ashymoss-2b719eff.westus3.azurecontainerapps.io` and TXT `asuid.starbot` →
+>   `158A2943A7A8ADBF8176E7CE25EDB042C36FD9D301A2A74E9B48E4F7730A2A82`. When they resolve:
+>   `az containerapp hostname add` + `bind` (free managed cert), add
+>   `https://starbot.starflooringandremodeling.com/api/auth/callback` to Entra redirect
+>   URIs, update `PUBLIC_BASE_URL`, then the connector wiring below.
+> - **Next up (Ethan's priority order):** email-drafting polish → persistent context
+>   workspaces (Salam) → back to Sonnet + a Haiku screener tool for deep email search →
+>   DB move to Azure Postgres → semantic mail index (phase 3, after DB move).
 > - **Connector is blocked on DNS.** It needs the app served at `starbot.starflooringandremodeling.com` (a verified subdomain) before Entra will accept the OAuth resource. Two records (CNAME `starbot` → the Container App FQDN, TXT `asuid.starbot` → the app's `customDomainVerificationId`) must be added at the site's DNS host — nameservers are `ns1/ns2.securedservers.info` (a VPS run by **DataNet or Greenman IT**, reached via the boss). GoDaddy only *registers* the domain; its DNS is elsewhere. Do NOT use GoDaddy Forwarding and do NOT switch nameservers.
 > - **After DNS:** repoint App ID URI + scope + `ACCEPTED_AUDIENCES` + `MCP_RESOURCE_URL` to the custom domain, set Manifest `requestedAccessTokenVersion: 2`, redeploy, point the connector there. Heads-up: Entra's RFC 8707 support is finicky, so budget one more tuning pass (see "Connector OAuth" section + FastMCP's Azure integration guide).
 > - **Confirmed via web research:** the verified-domain wall is **Microsoft Entra-specific**, not a Claude/MCP requirement (Entra identifier URIs must be a verified/initial tenant domain; other IdPs like Auth0 don't require it, and Entra's RFC 8707 support is finicky — see the "Connector OAuth" section).
@@ -70,13 +90,19 @@ This file is the single source of truth for picking the project back up. Read it
 - **Backend:** FastAPI + SQLAlchemy 2 + psycopg v3. **PostgreSQL only** (no SQLite).
 - **DB:** Neon (managed Postgres) in production; Docker Postgres locally
   (`docker-compose.yml`). Standard Postgres — no vendor lock-in on the data layer.
-- **Hosting:** **one** Google Cloud Run service serves BOTH the API and the built
-  frontend (root `Dockerfile`, multi-stage: Node builds the site → FastAPI serves it
-  from `./static`). One URL, one deploy.
-- **AI:** Anthropic API (Claude vision) for business-card extraction; a remote MCP
-  server (`backend/mcp_server.py`) as the Claude custom connector.
-- **Auth:** currently **none** — "users" are profiles selected client-side via an
-  `X-User-Id` header. Microsoft Entra (M365) SSO is scaffolded but not the live login yet.
+- **Hosting:** **Azure Container Apps** is production (app `starbot`, RG `starbot`,
+  westus3; one container serves API + built frontend — root `Dockerfile`, multi-stage:
+  Node builds the site → FastAPI serves it from `./static`). The old Google Cloud Run
+  service (`star-crm`, project `starcrm-500221`) is still up as legacy until retirement.
+- **AI:** Anthropic API — starbot chat agent loop (`backend/chat.py`, Haiku via
+  `CHAT_MODEL`), calendar address extraction (`backend/mileage.py`), business-card
+  extraction (`backend/cards.py`); plus a remote MCP server (`backend/mcp_server.py`)
+  as the Claude custom connector (blocked on DNS). **Azure Maps** for mileage
+  geocoding/routing.
+- **Auth:** **Microsoft sign-in required site-wide** (server-side OAuth in
+  `backend/m365.py`, signed-cookie sessions, per-user Graph token cache). The X-User-Id
+  header now only selects which CRM profile a signed-in user views; it is an auth door
+  only in local dev when Entra env vars are unset.
 
 **Use Python 3.13.** Not 3.14 — pydantic-core/pillow have no 3.14 wheels and pip will
 try (and fail) to compile from Rust. Build the venv with `py -3.13 -m venv .venv`.
