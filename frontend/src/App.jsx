@@ -372,32 +372,33 @@ export default function StarCRM() {
               </h1>
             </div>
             {/* Segmented control: buttons sit inset (p-0.5 + own rounding) so the
-                active pill never collides with the group border. */}
-            <div className="flex gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid #cdd6d4" }}>
+                active pill never collides with the group border. shrink-0 keeps
+                the tabs from being squished by long profile names in the row. */}
+            <div className="flex shrink-0 gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid #cdd6d4" }}>
               <button
                 onClick={() => switchView("chat")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
                 style={view === "chat" ? { background: INK, color: "white" } : { background: "white", color: INK }}
               >
                 <Sparkles size={14} /> Starbot
               </button>
               <button
                 onClick={() => switchView("tasks")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
                 style={view === "tasks" ? { background: INK, color: "white" } : { background: "white", color: INK }}
               >
                 <ListTodo size={14} /> Tasks
               </button>
               <button
                 onClick={() => switchView("mileage")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
                 style={view === "mileage" ? { background: INK, color: "white" } : { background: "white", color: INK }}
               >
                 <Car size={14} /> Mileage
               </button>
               <button
                 onClick={() => switchView("board")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
                 style={view === "board" ? { background: INK, color: "white" } : { background: "white", color: INK }}
               >
                 <LayoutGrid size={14} /> Board
