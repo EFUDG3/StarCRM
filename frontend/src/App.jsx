@@ -356,14 +356,9 @@ export default function StarCRM() {
 
   return (
     <div className="min-h-screen" style={{ background: MIST, color: INK }}>
-      {/* Chat + Tasks reclaim half the side whitespace on wide screens; the
-          CRM board keeps the tighter column so contact rows don't stretch. */}
-      <div
-        className={
-          (view === "board" ? "max-w-5xl" : "max-w-5xl lg:max-w-[calc(64rem+(100vw-64rem)/2)]") +
-          " mx-auto px-4 py-6"
-        }
-      >
+      {/* All tabs share one container width so the page boundaries don't jump
+          when switching views (board previously kept a tighter column). */}
+      <div className="max-w-5xl lg:max-w-[calc(64rem+(100vw-64rem)/2)] mx-auto px-4 py-6">
 
         {/* Header */}
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-6 border-b-2 pb-4" style={{ borderColor: INK }}>
@@ -376,31 +371,33 @@ export default function StarCRM() {
                 <span style={{ color: SEA }}>★</span> {view === "chat" ? "Starbot" : view === "tasks" ? "Star Tasks" : view === "mileage" ? "Star Mileage" : "Star CRM"}
               </h1>
             </div>
-            <div className="flex rounded overflow-hidden" style={{ border: "1px solid #cdd6d4" }}>
+            {/* Segmented control: buttons sit inset (p-0.5 + own rounding) so the
+                active pill never collides with the group border. */}
+            <div className="flex gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid #cdd6d4" }}>
               <button
                 onClick={() => switchView("chat")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded"
                 style={view === "chat" ? { background: INK, color: "white" } : { background: "white", color: INK }}
               >
                 <Sparkles size={14} /> Starbot
               </button>
               <button
                 onClick={() => switchView("tasks")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded"
                 style={view === "tasks" ? { background: INK, color: "white" } : { background: "white", color: INK }}
               >
                 <ListTodo size={14} /> Tasks
               </button>
               <button
                 onClick={() => switchView("mileage")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded"
                 style={view === "mileage" ? { background: INK, color: "white" } : { background: "white", color: INK }}
               >
                 <Car size={14} /> Mileage
               </button>
               <button
                 onClick={() => switchView("board")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded"
                 style={view === "board" ? { background: INK, color: "white" } : { background: "white", color: INK }}
               >
                 <LayoutGrid size={14} /> Board
