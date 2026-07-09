@@ -5,7 +5,7 @@
 // scanning the user's own Outlook calendar for street addresses.
 import { useEffect, useState } from "react";
 import {
-  Plus, Trash2, Copy, MapPin, Calendar, Check,
+  Plus, Trash2, Copy, MapPin, Calendar, Check, ChevronDown, ChevronUp,
 } from "lucide-react";
 import * as api from "./api.js";
 
@@ -28,6 +28,7 @@ export default function MileageTracker() {
   const [me, setMe] = useState(null);
   const [places, setPlaces] = useState([]);
   const [newIds, setNewIds] = useState(new Set());
+  const [expandedIds, setExpandedIds] = useState(new Set()); // log rows showing all addresses
   const [rate, setRate] = useState(null); // null = not loaded; user edits stick
   const [trips, setTrips] = useState(null); // null = loading
 
@@ -144,11 +145,10 @@ export default function MileageTracker() {
   };
 
   // --- Log helpers ------------------------------------------------------------
-  // Each saved entry stands alone (no day grouping): back-to-back saves can be
-  // different workers at different rates, so their totals must never merge.
-  // Dollars come from the server, priced at each trip's own stored rate.
-  const grandMiles = (trips || []).reduce((s, t) => s + t.totalMiles, 0);
-  const grandDollars = (trips || []).reduce((s, t) => s + t.dollars, 0);
+  // Each saved entry stands alone: no day grouping and NO grand total —
+  // back-to-back saves can be different workers at different rates, so any
+  // rolled-up number is meaningless. Dollars come from the server, priced at
+  // each trip's own stored rate.
   const effRate = rate == null || Number.isNaN(rate) ? 0.7 : rate;
 
   const legsSummary = (t) => {
@@ -156,12 +156,20 @@ export default function MileageTracker() {
     return dests.slice(0, 3).join(" · ") + (dests.length > 3 ? " …" : "");
   };
 
-  const copyLog = () => {
-    let text = "Date\tMiles\tRate\tAmount\n";
-    (trips || []).slice().reverse().forEach((t) => {
-      text += `${t.date}\t${t.totalMiles.toFixed(1)}\t${t.rate.toFixed(2)}\t${t.dollars.toFixed(2)}\n`;
+  const toggleExpanded = (id) =>
+    setExpandedIds((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
-    text += `\nGrand total\t${grandMiles.toFixed(1)} mi\t\t${grandDollars.toFixed(2)}\n`;
+
+  const copyLog = () => {
+    let text = "Date\tStops\tMiles\tRate\tAmount\n";
+    (trips || []).slice().reverse().forEach((t) => {
+      const dests = t.legs.length > 1 ? t.legs.slice(0, -1).map((l) => l.to) : [t.legs[0]?.to];
+      text += `${t.date}\t${dests.join("; ")}\t${t.totalMiles.toFixed(1)}\t${t.rate.toFixed(2)}\t${t.dollars.toFixed(2)}\n`;
+    });
     navigator.clipboard.writeText(text).catch(() => {});
   };
 
@@ -318,32 +326,58 @@ export default function MileageTracker() {
               </button>
             </div>
             <div className="space-y-2">
-              {(trips || []).map((t) => (
-                <div key={t.id} className="group rounded px-3 py-2" style={{ border: "1px solid #e5e0d8" }}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex items-baseline gap-3 min-w-0">
-                      <span className="font-mono text-xs font-bold shrink-0">{t.date}</span>
-                      <span className="text-[13px] truncate" style={{ color: "#4a5a60" }}>
-                        {t.legs.length} leg{t.legs.length === 1 ? "" : "s"}: {legsSummary(t)}
-                      </span>
-                    </span>
-                    <span className="flex items-center gap-3 shrink-0">
-                      <span className="font-mono text-[13px] font-medium">{t.totalMiles.toFixed(1)} mi</span>
-                      <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(t.dollars)}</span>
-                      <span className="font-mono text-[11px]" style={{ color: "#8b9a9f" }}>@ ${t.rate.toFixed(2)}</span>
-                      <button onClick={() => removeTrip(t)} className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-stone-100" style={{ color: TIDE }} title="Delete entry">
-                        <Trash2 size={13} />
+              {(trips || []).map((t) => {
+                const open = expandedIds.has(t.id);
+                return (
+                  <div key={t.id} className="group rounded px-3 py-2" style={{ border: "1px solid #e5e0d8" }}>
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        onClick={() => toggleExpanded(t.id)}
+                        className="flex items-baseline gap-3 min-w-0 text-left flex-1"
+                        title={open ? "Hide addresses" : "Show all addresses"}
+                      >
+                        <span className="font-mono text-xs font-bold shrink-0">{t.date}</span>
+                        {!open && (
+                          <span className="text-[13px] truncate" style={{ color: "#4a5a60" }}>
+                            {t.legs.length} leg{t.legs.length === 1 ? "" : "s"}: {legsSummary(t)}
+                          </span>
+                        )}
+                        {open && (
+                          <span className="text-[13px]" style={{ color: "#8b9a9f" }}>
+                            {t.legs.length} leg{t.legs.length === 1 ? "" : "s"}
+                          </span>
+                        )}
                       </button>
-                    </span>
+                      <span className="flex items-center gap-3 shrink-0">
+                        <span className="font-mono text-[13px] font-medium">{t.totalMiles.toFixed(1)} mi</span>
+                        <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(t.dollars)}</span>
+                        <span className="font-mono text-[11px]" style={{ color: "#8b9a9f" }}>@ ${t.rate.toFixed(2)}</span>
+                        <button onClick={() => toggleExpanded(t.id)} className="p-1 rounded hover:bg-stone-100" style={{ color: INK }} title={open ? "Collapse" : "Expand addresses"}>
+                          {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        </button>
+                        <button onClick={() => removeTrip(t)} className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-stone-100" style={{ color: TIDE }} title="Delete entry">
+                          <Trash2 size={13} />
+                        </button>
+                      </span>
+                    </div>
+                    {open && (
+                      <div className="starbot-wrap mt-2 pt-2 space-y-1 border-t" style={{ borderColor: "#eee9e2" }}>
+                        <div className="text-[12px]" style={{ color: "#8b9a9f" }}>
+                          Start: {t.legs[0]?.from}
+                        </div>
+                        {t.legs.map((l, i) => (
+                          <div key={i} className="flex items-baseline justify-between gap-3 text-[13px]">
+                            <span style={{ color: "#4a5a60" }}>{i + 1}. {l.to}</span>
+                            <span className="font-mono text-[12px] shrink-0" style={{ color: "#8b9a9f" }}>
+                              {l.miles.toFixed(1)} mi · {l.minutes}m
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-center justify-between mt-3 rounded px-4 py-3" style={{ background: "#FBEAE8" }}>
-              <span className="font-mono text-xs uppercase tracking-widest" style={{ color: "#4a5a60" }}>Grand total</span>
-              <span className="font-mono text-base font-bold" style={{ color: SEA }}>
-                {grandMiles.toFixed(1)} mi · {fmtMoney(grandDollars)}
-              </span>
+                );
+              })}
             </div>
             <div className="font-mono text-[11px] mt-2" style={{ color: "#8b9a9f" }}>
               Each entry keeps the rate it was saved with — set the rate in the trip form before calculating.
