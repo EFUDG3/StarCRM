@@ -76,6 +76,9 @@ export default function StarCRM() {
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
+  // Up-next rail collapse state, remembered across visits.
+  const [upNextOpen, setUpNextOpen] = useState(() => localStorage.getItem("upNextOpen") !== "0");
+  useEffect(() => { localStorage.setItem("upNextOpen", upNextOpen ? "1" : "0"); }, [upNextOpen]);
   const cardInputRef = useRef(null);
 
   const refresh = async () => {
@@ -363,11 +366,13 @@ export default function StarCRM() {
         {/* Header */}
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-6 border-b-2 pb-4" style={{ borderColor: INK }}>
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:gap-4">
-            <div>
-              <div className="font-mono text-xs tracking-[0.25em] uppercase mb-1" style={{ color: SEA }}>
+            {/* Fixed width so the tab buttons keep the same position on every
+                view — the titles vary in length and used to shift the row. */}
+            <div className="sm:w-60 shrink-0">
+              <div className="font-mono text-xs tracking-[0.25em] uppercase mb-1 whitespace-nowrap" style={{ color: SEA }}>
                 {view === "chat" ? "AI assistant" : view === "tasks" ? "Task board" : view === "mileage" ? "Mileage tracker" : "Relationship board"}
               </div>
-              <h1 className="text-3xl font-bold tracking-tight" style={{ fontFamily: "Georgia, serif" }}>
+              <h1 className="text-3xl font-bold tracking-tight whitespace-nowrap" style={{ fontFamily: "Georgia, serif" }}>
                 <span style={{ color: SEA }}>★</span> {view === "chat" ? "Starbot" : view === "tasks" ? "Star Tasks" : view === "mileage" ? "Star Mileage" : "Star CRM"}
               </h1>
             </div>
@@ -469,10 +474,20 @@ export default function StarCRM() {
           </div>
         )}
 
-        {/* Up next rail */}
+        {/* Up next rail — sized to match the contact list rows; collapsible so
+            the full CRM list can be reviewed without the rail taking space. */}
         {dueSoon.length > 0 && !selected && !editing && (
           <section className="mb-6">
-            <div className="font-mono text-lg font-bold tracking-[0.2em] uppercase mb-3" style={{ color: SEA }}>Up next</div>
+            <button
+              onClick={() => setUpNextOpen((o) => !o)}
+              className="flex items-center gap-1.5 font-mono text-sm font-bold tracking-[0.2em] uppercase mb-3"
+              style={{ color: SEA }}
+              title={upNextOpen ? "Collapse" : "Expand"}
+            >
+              Up next ({dueSoon.length})
+              <ChevronDown size={14} className={"transition-transform " + (upNextOpen ? "" : "-rotate-90")} />
+            </button>
+            {upNextOpen && (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {dueSoon.map((c) => (
                 <button
@@ -481,17 +496,18 @@ export default function StarCRM() {
                   className="text-left bg-white rounded p-3 flex items-start gap-3 border-l-4 hover:shadow-sm transition-shadow min-w-0"
                   style={{ borderColor: c.overdue || c.today ? TIDE : SAND }}
                 >
-                  <Clock size={20} className="mt-0.5 shrink-0" style={{ color: c.overdue || c.today ? TIDE : SEA }} />
+                  <Clock size={15} className="mt-1 shrink-0" style={{ color: c.overdue || c.today ? TIDE : SEA }} />
                   <div className="min-w-0">
-                    <div className="text-lg font-semibold truncate">{c.name}</div>
-                    <div className="text-base truncate" style={{ color: "#4a5a60" }}>{c.nextAction}</div>
-                    <div className="font-mono text-sm mt-1 font-medium" style={{ color: c.overdue ? TIDE : "#6b7a80" }}>
+                    <div className="font-semibold truncate">{c.name}</div>
+                    <div className="text-sm truncate" style={{ color: "#4a5a60" }}>{c.nextAction}</div>
+                    <div className="font-mono text-xs mt-1 font-medium" style={{ color: c.overdue ? TIDE : "#6b7a80" }}>
                       {c.overdue ? "overdue · " : c.today ? "today · " : "due "}{c.nextDue}
                     </div>
                   </div>
                 </button>
               ))}
             </div>
+            )}
           </section>
         )}
 
