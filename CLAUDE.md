@@ -24,7 +24,34 @@ This file is the single source of truth for picking the project back up. Read it
 > (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
 > + Rate columns; own calendar only.
 
-> **Resume note (2026-07-09, LATEST) — custom domain live, sign-in secret fixed, UI polish shipped, DB decision made.**
+> **Resume note (2026-07-15, LATEST) — connector server-side COMPLETE; only the claude.ai add remains.**
+> - **Entra:** App ID URI `https://starbot.starflooringandremodeling.com/mcp` ADDED
+>   (kept `api://<client-id>` too — Entra accepted it, verified-domain wall cleared).
+>   Redirect URI `https://claude.com/api/mcp/auth_callback` added alongside the
+>   claude.ai one. tokenVersion was already 2.
+> - **Code (commit 6b86d49):** `required_scopes`, the PRM override (`resource` +
+>   `scopes_supported`), the token-verifier scope list, and the AS-shim
+>   `scopes_supported` all derive from `MCP_RESOURCE_URL` now — full scope is
+>   `<MCP_RESOURCE_URL>/access_as_user`. No more hardcoded `api://` scope forms.
+> - **Deployed:** revision `starbot--0000019`, image `starbot:mcp-custom-domain`,
+>   `ENTRA_AUDIENCE` = `MCP_RESOURCE_URL` = `https://starbot.starflooringandremodeling.com/mcp`.
+>   Verified live: PRM resource/scope on the custom domain; AS shim → Microsoft
+>   endpoints + S256; unauth POST /mcp/ → 401 with correct `resource_metadata`;
+>   web app unaffected (root 200).
+> - **REMAINING (blocked on a human):** (1) new Entra client secret for the
+>   connector — the `.env` `ENTRA_CLIENT_SECRET` is DEAD (AADSTS7000215; it's the
+>   deleted `starbot-chat` value) and `OauthForStarCRM`'s value is unretrievable.
+>   Portal → app 066b737b → Certificates & secrets → new secret → paste the Value
+>   STRAIGHT into claude.ai (never chat/files). (2) claude.ai → Settings →
+>   Connectors → Add custom connector → URL `https://starbot.starflooringandremodeling.com/mcp`,
+>   OAuth client ID `066b737b-a053-4b53-af03-5cabc03fbf26`, the new secret.
+>   (3) Budget the RFC 8707 tuning pass if the token exchange still misbehaves.
+> - **Gotchas:** `az acr build` log streaming crashes on `✓` under cp1252 — set
+>   `PYTHONUTF8=1`; the build succeeds server-side anyway (`az acr task list-runs`).
+>   Local `backend/.env` still holds the dead secret — replace it if local M365
+>   login is ever needed.
+>
+> **Resume note (2026-07-09) — custom domain live, sign-in secret fixed, UI polish shipped, DB decision made.**
 > - **Custom domain LIVE:** DNS records added by Greenman/DataNet (cPanel) 2026-07-09;
 >   `az containerapp hostname add` + `bind` done — managed cert
 >   `mc-starbot-env-starbot-starfloo-9216` (SniEnabled) on env `starbot-env`;
