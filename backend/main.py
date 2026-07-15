@@ -550,7 +550,8 @@ if _mcp_app is not None:
     # resource metadata (from mcp_server.py) advertises this origin as the
     # authorization server, so Claude lands here.
 
-    _AS_ORIGIN = os.getenv("MCP_RESOURCE_URL", "http://localhost:8000/mcp").rsplit("/mcp", 1)[0]
+    _MCP_RESOURCE = os.getenv("MCP_RESOURCE_URL", "http://localhost:8000/mcp")
+    _AS_ORIGIN = _MCP_RESOURCE.rsplit("/mcp", 1)[0]
     # Match the trailing slash that AnyHttpUrl puts on authorization_servers in the
     # protected-resource metadata; RFC 8414 requires issuer to match byte-for-byte.
     _AS_ISSUER = _AS_ORIGIN.rstrip("/") + "/"
@@ -566,7 +567,7 @@ if _mcp_app is not None:
             "client_secret_post", "client_secret_basic",
         ],
         "scopes_supported": [
-            f"api://{auth.CLIENT_ID}/access_as_user",
+            f"{_MCP_RESOURCE}/access_as_user",
             "openid", "profile", "offline_access",
         ],
     }

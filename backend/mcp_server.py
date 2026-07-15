@@ -205,11 +205,16 @@ def build_mcp_app():
                 return None
             oid = claims.get("oid") or claims.get("sub") or "unknown"
             # Entra stamps only the SHORT scope name (e.g. "access_as_user") into the
-            # token's `scp`. RequireAuthMiddleware checks required_scopes (the full
-            # api://<client-id>/access_as_user URI, which Claude must REQUEST) against
-            # this list, so expose both the short names and their fully-qualified forms.
+            # token's `scp`. RequireAuthMiddleware checks required_scopes (a full
+            # <App ID URI>/access_as_user form, which Claude must REQUEST) against
+            # this list, so expose the short names plus both registered App ID URI
+            # forms (api://<client-id> and the custom-domain resource URL).
             short = (claims.get("scp") or "").split()
-            scopes = short + [f"api://{auth.CLIENT_ID}/{s}" for s in short]
+            scopes = short + [
+                f"{prefix}/{s}"
+                for s in short
+                for prefix in (f"api://{auth.CLIENT_ID}", resource_url)
+            ]
             return AccessToken(
                 token=token, client_id=oid, scopes=scopes, expires_at=claims.get("exp")
             )
@@ -231,9 +236,13 @@ def build_mcp_app():
             # metadata's scopes_supported and Claude requests it. Microsoft rejects a
             # bare "access_as_user" and rejects an offline_access-only request with no
             # resource scope, so this value is what makes the token request valid.
-            # EntraTokenVerifier reports this same full URI as a held scope (Entra only
-            # puts the short name in `scp`), so the middleware check passes.
-            required_scopes=[f"api://{auth.CLIENT_ID}/access_as_user"],
+            # The resource URL (custom domain) is a registered Entra App ID URI, so
+            # <resource_url>/access_as_user is a valid full scope AND matches the
+            # RFC 8707 `resource` Claude sends (the URL it connects to) — Entra
+            # requires that resource to be a registered App ID URI (AADSTS9010010
+            # otherwise). EntraTokenVerifier reports this same full URI as a held
+            # scope (Entra only puts the short name in `scp`), so the check passes.
+            required_scopes=[f"{resource_url}/access_as_user"],
         ),
         # Serve the MCP endpoint at the sub-app root so that mounting this app at
         # "/mcp" in main.py yields the endpoint at "/mcp" (not "/mcp/mcp"). The
@@ -340,20 +349,21 @@ def build_mcp_app():
 
     app = mcp.streamable_http_app()
 
-    # Override the protected-resource metadata's `resource` field to the Entra App
-    # ID URI (api://<client-id>) instead of the HTTP MCP URL. Claude echoes this
-    # value as the RFC 8707 `resource` parameter at Entra's token endpoint, and
-    # Entra only accepts a registered App ID URI there. The HTTP URL fails with
-    # AADSTS9010010 / invalid_target, and it can't be registered as an identifier
-    # URI because run.app is not a verified domain of the tenant. authorization_
-    # servers still points at our origin (the AS-metadata shim in main.py).
+    # Serve the protected-resource metadata explicitly so `resource` and
+    # scopes_supported are pinned to the custom-domain MCP URL, which is now a
+    # registered Entra App ID URI (the tenant only verifies its own domains, so
+    # this became possible once starbot.starflooringandremodeling.com went live).
+    # Claude echoes the URL it connects to as the RFC 8707 `resource` parameter
+    # at Entra's token endpoint, and Entra only accepts a registered App ID URI
+    # there — with resource == App ID URI these now line up. authorization_
+    # servers points at our origin (the AS-metadata shim in main.py).
     from starlette.responses import JSONResponse
     from starlette.routing import Route
 
     _prm = {
-        "resource": f"api://{auth.CLIENT_ID}",
+        "resource": resource_url,
         "authorization_servers": [origin.rstrip("/") + "/"],
-        "scopes_supported": [f"api://{auth.CLIENT_ID}/access_as_user"],
+        "scopes_supported": [f"{resource_url}/access_as_user"],
         "bearer_methods_supported": ["header"],
     }
 
