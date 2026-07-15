@@ -16,6 +16,7 @@ couldn't exist as a static page:
 """
 import json
 import os
+from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -245,7 +246,10 @@ def list_places(
     db: Session = Depends(get_db),
 ) -> list:
     rows = db.query(Place).filter(Place.user_id == user.id).all()
-    rows.sort(key=lambda p: (p.last_used or "", p.times_used or 0), reverse=True)
+    # Stack, not queue: newest-added first, so places from a fresh calendar
+    # scan (and new manual adds) land at the top of the rail instead of
+    # burying themselves under the long-standing address book.
+    rows.sort(key=lambda p: p.created_at or datetime.min, reverse=True)
     return [_ser_place(p) for p in rows]
 
 
