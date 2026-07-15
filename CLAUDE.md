@@ -38,14 +38,27 @@ This file is the single source of truth for picking the project back up. Read it
 >   Verified live: PRM resource/scope on the custom domain; AS shim → Microsoft
 >   endpoints + S256; unauth POST /mcp/ → 401 with correct `resource_metadata`;
 >   web app unaffected (root 200).
-> - **REMAINING (blocked on a human):** (1) new Entra client secret for the
->   connector — the `.env` `ENTRA_CLIENT_SECRET` is DEAD (AADSTS7000215; it's the
->   deleted `starbot-chat` value) and `OauthForStarCRM`'s value is unretrievable.
->   Portal → app 066b737b → Certificates & secrets → new secret → paste the Value
->   STRAIGHT into claude.ai (never chat/files). (2) claude.ai → Settings →
->   Connectors → Add custom connector → URL `https://starbot.starflooringandremodeling.com/mcp`,
->   OAuth client ID `066b737b-a053-4b53-af03-5cabc03fbf26`, the new secret.
->   (3) Budget the RFC 8707 tuning pass if the token exchange still misbehaves.
+> - **Connector added in claude.ai, first connect FAILED post-login, root cause
+>   FIXED (2026-07-15):** the tenant had no delegated consent grant for the app's
+>   OWN `access_as_user` scope — only the Graph scopes were admin-consented, and
+>   user consent is restricted, so Entra bounced the flow back to Claude
+>   ("check your credentials and permissions", trace ofid_c389235781dc28be).
+>   Fixed by creating an AllPrincipals `oauth2PermissionGrant` via Graph POST
+>   (starbot SP `d8d887fe` as both clientId and resourceId, scope
+>   `access_as_user`) and adding the self-API permission to
+>   requiredResourceAccess for portal visibility. Everything else verified good:
+>   authorize request validates for all scope/resource permutations (probed
+>   unauthenticated), token endpoint resolves the custom-domain resource, new
+>   connector secret is valid (and now in local `.env`; v2 tokens stamp aud =
+>   client GUID, which ACCEPTED_AUDIENCES covers). **Retry the connector connect
+>   in claude.ai — consent was the only missing piece found.**
+> - **Diagnostic recipe (worked well, reuse):** (1) probe `/authorize`
+>   unauthenticated — request-level AADSTS errors return pre-login as redirects;
+>   (2) `client_credentials` grant with `<App ID URI>/.default` — tests secret
+>   validity AND token-endpoint resource resolution without a user; (3) Graph
+>   `oauth2PermissionGrants?$filter=clientId eq '<sp-id>'` — consent state;
+>   (4) Entra interactive sign-in logs show NOTHING for pre-login and
+>   consent-stage failures — absence of a failed entry is itself a clue.
 > - **Gotchas:** `az acr build` log streaming crashes on `✓` under cp1252 — set
 >   `PYTHONUTF8=1`; the build succeeds server-side anyway (`az acr task list-runs`).
 >   Local `backend/.env` still holds the dead secret — replace it if local M365
