@@ -27,6 +27,7 @@ import chat
 import m365
 import mileage
 import models  # noqa: F401 (ensures models are registered on Base)
+import telemetry
 from database import Base, engine, get_db
 from models import Contact, Interaction, User
 from schemas import ChatIn, ContactIn, LogIn, TodoIn, TodoPatch, UserIn
@@ -242,6 +243,17 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/api/stats")
+def usage_stats(
+    days: int = 30,
+    _viewer: User = Depends(m365.get_session_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Aggregate usage telemetry (counts only, no content) for the value
+    report. Any signed-in employee may view it."""
+    return telemetry.compute_stats(db, days)
+
+
 # --- Starbot: M365 sign-in, chat, to-dos ------------------------------------
 # These routes use the M365 session cookie (m365.get_session_user), NOT the
 # X-User-Id header — the chat needs Graph tokens, which hang off the Microsoft
@@ -262,6 +274,7 @@ def chat_endpoint(
     if not payload.messages:
         raise HTTPException(status_code=400, detail="messages is required")
     graph_token = m365.get_graph_token(user, db)
+    telemetry.log_event(user.id, "chat", "message")
     return StreamingResponse(
         chat.stream_chat(payload.messages, user.id, graph_token),
         media_type="text/event-stream",
@@ -287,6 +300,7 @@ def create_todo(
     if not payload.text.strip():
         raise HTTPException(status_code=400, detail="text is required")
     created = chat.op_add_todos(db, user, [payload.model_dump()])
+    telemetry.log_event(user.id, "tasks", "todo_created")
     return created[0]
 
 
@@ -303,7 +317,9 @@ def patch_todo(
     if "done" in fields:
         fields["status"] = "done" if fields.pop("done") else "todo"
     try:
-        return chat.op_update_todo(db, user, todo_id, **fields)
+        updated = chat.op_update_todo(db, user, todo_id, **fields)
+        telemetry.log_event(user.id, "tasks", "todo_updated", ",".join(sorted(fields)))
+        return updated
     except ValueError as e:
         code = 404 if "not found" in str(e).lower() else 400
         raise HTTPException(status_code=code, detail=str(e))
@@ -317,6 +333,7 @@ def remove_todo(
 ) -> None:
     try:
         chat.op_delete_todo(db, user, todo_id)
+        telemetry.log_event(user.id, "tasks", "todo_deleted")
     except ValueError:
         raise HTTPException(status_code=404, detail="To-do not found")
 
@@ -408,6 +425,7 @@ def create_contact(
     db.add(contact)
     db.commit()
     db.refresh(contact)
+    telemetry.log_event(user.id, "crm", "contact_created")
     return serialize(contact)
 
 
@@ -440,6 +458,7 @@ def update_contact(
     contact.notes = payload.notes
     db.commit()
     db.refresh(contact)
+    telemetry.log_event(user.id, "crm", "contact_updated")
     return serialize(contact)
 
 
@@ -452,6 +471,7 @@ def delete_contact(
     contact = _get_or_404(db, user, contact_id)
     db.delete(contact)
     db.commit()
+    telemetry.log_event(user.id, "crm", "contact_deleted")
 
 
 @app.post("/api/contacts/{contact_id}/log")
@@ -467,6 +487,7 @@ def log_touch(
     )
     db.commit()
     db.refresh(contact)
+    telemetry.log_event(user.id, "crm", "touch_logged")
     return serialize(contact)
 
 
@@ -484,6 +505,7 @@ def complete_action(
     contact.next_due = ""
     db.commit()
     db.refresh(contact)
+    telemetry.log_event(user.id, "crm", "action_completed")
     return serialize(contact)
 
 
@@ -519,6 +541,7 @@ async def scan_card(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Card extraction failed: {e}")
     fields["cardImage"] = cards.to_data_url(jpeg)
+    telemetry.log_event(user.id, "crm", "card_scanned")
     return fields
 
 

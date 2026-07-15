@@ -171,6 +171,8 @@ def callback(
     user = auth.user_from_claims(result.get("id_token_claims") or {}, db)
     user.m365_token_cache = cache.serialize()
     db.commit()
+    import telemetry  # local: m365 is imported by telemetry-adjacent modules early in startup
+    telemetry.log_event(user.id, "auth", "sign_in")
 
     resp = RedirectResponse(POST_LOGIN_REDIRECT, status_code=302)
     resp.delete_cookie(_FLOW_COOKIE)

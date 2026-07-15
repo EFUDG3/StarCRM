@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 import graph
 import m365
+import telemetry
 from database import get_db
 from models import Place, Trip, User
 from schemas import PlaceIn, RouteIn, ScanIn, TripIn
@@ -168,6 +169,7 @@ def calc_route(
     coords = [_coords_for(db, user, a) for a in addresses]
     legs = _route_legs(coords, addresses)
     total = round(sum(l["miles"] for l in legs), 1)
+    telemetry.log_event(user.id, "mileage", "route_calculated", f"{len(addresses)} stops")
     return {
         "legs": legs,
         "totalMiles": total,
@@ -223,6 +225,7 @@ def save_trip(
         _upsert_place(db, user, addr, payload.date, r.get("lat"), r.get("lon"))
     db.commit()
     db.refresh(trip)
+    telemetry.log_event(user.id, "mileage", "trip_saved", f"{trip.total_miles} mi")
     return _ser_trip(trip)
 
 
@@ -356,6 +359,8 @@ def scan_calendar(
                               label=item["label"], source="calendar")
         new_places.append(place)
     db.commit()
+    telemetry.log_event(user.id, "mileage", "calendar_scanned",
+                        f"{len(events)} events, {len(new_places)} new")
     return {
         "scanned": len(events),
         "new": [_ser_place(p) for p in new_places],

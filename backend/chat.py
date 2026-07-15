@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 import graph
 import mcp_server
+import telemetry
 from database import SessionLocal
 from models import Todo, User
 
@@ -498,6 +499,7 @@ def stream_chat(messages: list[dict], user_id: str, graph_token: str):
                         })
                         continue
                 yield _sse({"type": "tool", "name": block.name})
+                telemetry.log_event(user.id, "chat", f"tool:{block.name}")
                 try:
                     output = _run_tool(block.name, block.input or {}, user, db, graph_token)
                     results.append({

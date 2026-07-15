@@ -166,6 +166,21 @@ class Place(Base):
     owner = relationship("User", back_populates="places")
 
 
+class Event(Base):
+    """One usage-telemetry row: who did what, where, when. Written best-effort
+    by telemetry.log_event (a failure there never breaks the feature being
+    observed); read only by the /api/stats aggregate summary."""
+
+    __tablename__ = "events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String, nullable=True, index=True)
+    area = Column(String, nullable=False)    # chat | crm | tasks | mileage | connector | auth
+    action = Column(String, nullable=False)  # e.g. "message", "tool:read_email", "trip_saved"
+    detail = Column(String, default="")
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+
 class Trip(Base):
     """One saved mileage calculation (a day's route). Legs are stored as the
     JSON the routing endpoint returned: [{from, to, miles, minutes}]."""

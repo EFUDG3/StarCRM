@@ -27,6 +27,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 import auth
+import telemetry
 from database import SessionLocal
 from models import Contact, Interaction, User
 
@@ -180,6 +181,13 @@ def _resolve_user(db: Session) -> User:
     return auth.user_from_claims(claims, db)
 
 
+def _resolve_and_log(db: Session, tool: str) -> User:
+    """Resolve the connector user and record the tool call in usage telemetry."""
+    user = _resolve_user(db)
+    telemetry.log_event(user.id, "connector", f"tool:{tool}")
+    return user
+
+
 def build_mcp_app():
     """Construct the FastMCP server and return its Streamable-HTTP ASGI app for
     mounting at /mcp. Raises if the MCP SDK or Entra config isn't ready, so
@@ -257,7 +265,7 @@ def build_mcp_app():
         notes. Call this BEFORE create_contact to avoid adding a duplicate."""
         db = SessionLocal()
         try:
-            return op_search(db, _resolve_user(db), query)
+            return op_search(db, _resolve_and_log(db, "search_contacts"), query)
         finally:
             db.close()
 
@@ -266,7 +274,7 @@ def build_mcp_app():
         """Get one contact by id, including its activity log."""
         db = SessionLocal()
         try:
-            return op_get(db, _resolve_user(db), contact_id)
+            return op_get(db, _resolve_and_log(db, "get_contact"), contact_id)
         finally:
             db.close()
 
@@ -292,7 +300,7 @@ def build_mcp_app():
         db = SessionLocal()
         try:
             return op_create(
-                db, _resolve_user(db), name=name, company=company, role=role,
+                db, _resolve_and_log(db, "create_contact"), name=name, company=company, role=role,
                 email=email, phone=phone, category=category,
                 category_label=category_label, next_action=next_action,
                 next_due=next_due, notes=notes,
@@ -319,7 +327,7 @@ def build_mcp_app():
         db = SessionLocal()
         try:
             return op_update(
-                db, _resolve_user(db), contact_id, name=name, company=company,
+                db, _resolve_and_log(db, "update_contact"), contact_id, name=name, company=company,
                 role=role, email=email, phone=phone, category=category,
                 category_label=category_label, next_action=next_action,
                 next_due=next_due, notes=notes,
@@ -333,7 +341,7 @@ def build_mcp_app():
         has explicitly confirmed they want this exact contact removed."""
         db = SessionLocal()
         try:
-            return op_delete(db, _resolve_user(db), contact_id)
+            return op_delete(db, _resolve_and_log(db, "delete_contact"), contact_id)
         finally:
             db.close()
 
@@ -343,7 +351,7 @@ def build_mcp_app():
         date (YYYY-MM-DD); defaults to today if omitted."""
         db = SessionLocal()
         try:
-            return op_log_touch(db, _resolve_user(db), contact_id, note, date)
+            return op_log_touch(db, _resolve_and_log(db, "log_touch"), contact_id, note, date)
         finally:
             db.close()
 
