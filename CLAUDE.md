@@ -59,6 +59,19 @@ This file is the single source of truth for picking the project back up. Read it
 >   `oauth2PermissionGrants?$filter=clientId eq '<sp-id>'` — consent state;
 >   (4) Entra interactive sign-in logs show NOTHING for pre-login and
 >   consent-stage failures — absence of a failed entry is itself a clue.
+> - **CONNECTOR LIVE + VERIFIED END-TO-END (2026-07-15, same day):** claude.ai
+>   connected after the consent fix — container logs show Anthropic's initialize/
+>   tools-list 200s at 16:53Z. Then a full local replication of Claude's exact
+>   flow (auth-code + PKCE via the registered localhost:8000 callback, token
+>   exchange WITH the RFC 8707 `resource` param, live MCP calls with the
+>   delegated token): initialize 200 → tools/list 200 (all 6 tools) →
+>   `search_contacts` 200 returning ETHAN's board (identity→profile mapping
+>   correct; v2 token aud = client GUID, scp = access_as_user). App-only tokens
+>   correctly rejected 403 insufficient_scope. Roadmap item #2 is DONE.
+>   Optional hardening spotted in logs: Claude also probes the RFC 9728
+>   path-inserted form `/.well-known/oauth-protected-resource/mcp` at the ROOT
+>   (gets 404, falls back fine) — serving that alias would help other MCP
+>   clients that don't fall back.
 > - **Gotchas:** `az acr build` log streaming crashes on `✓` under cp1252 — set
 >   `PYTHONUTF8=1`; the build succeeds server-side anyway (`az acr task list-runs`).
 >   Local `backend/.env` still holds the dead secret — replace it if local M365
