@@ -24,7 +24,51 @@ This file is the single source of truth for picking the project back up. Read it
 > (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
 > + Rate columns; own calendar only.
 
-> **Resume note (2026-07-07, latest) — starbot LIVE on Azure: 4 tabs, company-gated, secrets rotated.**
+> **Resume note (2026-07-09, LATEST) — custom domain live, sign-in secret fixed, UI polish shipped, DB decision made.**
+> - **Custom domain LIVE:** DNS records added by Greenman/DataNet (cPanel) 2026-07-09;
+>   `az containerapp hostname add` + `bind` done — managed cert
+>   `mc-starbot-env-starbot-starfloo-9216` (SniEnabled) on env `starbot-env`;
+>   `PUBLIC_BASE_URL=https://starbot.starflooringandremodeling.com`; Entra redirect URI
+>   for the custom-domain callback added. Login round-trip verified. **Later same day the
+>   ENTIRE domain zone went down** (DNS host outage — affects the company site too;
+>   DataNet is on it). The azurecontainerapps.io URL always works; custom domain resumes
+>   automatically when their DNS returns. Nothing to redo on our side.
+> - **Sign-in was broken for fresh logins (AADSTS7000215), now fixed:** the 7/7 rotation
+>   deleted the WRONG Entra secret (`starbot-chat` gone; `OauthForStarCRM` survived).
+>   Existing session cookies masked it. New secret `starbot-login-2026-07` (expires
+>   2028-07-09) created + stored as container secret `entra-client-secret` (value never
+>   in chat/logs — Entra→shell var→secret store; verified via 3-char hint `9au` + length).
+>   TODO: sync new value to GCP Secret Manager if Cloud Run legacy stays, or retire it.
+> - **Connector is UNBLOCKED** (verified-domain requirement satisfied). Remaining:
+>   Entra App ID URI → custom-domain form, scope, `ENTRA_AUDIENCE`/ACCEPTED_AUDIENCES,
+>   `MCP_RESOURCE_URL=https://starbot.starflooringandremodeling.com/mcp`, redeploy,
+>   add connector in claude.ai. Budget a tuning pass (Entra RFC 8707 finicky).
+> - **DB decision (settled after reviewing Azure SQL free tier etc.):** Azure Database for
+>   PostgreSQL Flexible Server, **B1ms / 32 GiB / westus3 / RG starbot / Postgres auth
+>   only / public access + allow-Azure-services**, on **StarSubscription** (not the trial
+>   account — credits don't transfer; portal list price **$20.48/mo** = $16.06 compute +
+>   $4.42 storage, and that IS the definitive number for the boss). Azure SQL free tier
+>   rejected: 100k vCore-sec ≈ 55 online-hrs/mo → dead-or-$30/mo for an all-day app, plus
+>   dialect port. Migration order matters: create server → pg_dump/restore from Neon →
+>   THEN swap `database-url` secret (app seeds Bob on an empty DB if pointed first).
+>   Keep Neon a week as rollback. Password: no `&`/`@` chars.
+> - **Claude credits:** buying ~$25-50 at console.anthropic.com moves the org from legacy
+>   free limits (the 1-chat-per-use problem) to Start tier: Haiku 2M ITPM / 400k OTPM,
+>   cached reads don't count toward ITPM. Ethan asking Salam. Cost email drafted
+>   (~$40-75/mo company-wide on Haiku; DB is the main fixed cost at ~$20.50).
+> - **UI shipped (revisions 14→18, all committed + PUSHED to GitHub):** board page shares
+>   the wide container (no width jump between tabs); tab group is an inset segmented
+>   control, shrink-proof (`shrink-0` + nowrap — long profile names truncate instead of
+>   squishing buttons); title block fixed `sm:w-60` so tabs never move between views;
+>   Up-Next rail compacted to match contact-row sizing + collapsible (localStorage);
+>   mileage Places list sorts newest-first (stack) so calendar-scan results land on top.
+> - **Commit style: NO Co-Authored-By Claude trailers** (Ethan's rule; history was
+>   filter-branch'd to strip them before the 2026-07-09 push).
+> - **az CLI note:** `az` is not on the harness shell PATH — use
+>   `& "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -IBm azure.cli ...`
+>   (also the safe path for secret values; avoids az.cmd `&` truncation).
+
+> **Resume note (2026-07-07) — starbot LIVE on Azure: 4 tabs, company-gated, secrets rotated.** (Older — DNS/connector bullets below are superseded by the 07-09 note above.)
 > - **What starbot is:** Star's company-wide internal AI assistant (Copilot-style chat over
 >   each user's OWN email/calendar/SharePoint via per-user M365 OAuth). Owner (Salam)
 >   requirements from the cancelled Data Net project: (1) query email/OneDrive/SharePoint/
