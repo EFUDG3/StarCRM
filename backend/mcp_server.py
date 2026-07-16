@@ -355,6 +355,73 @@ def build_mcp_app():
         finally:
             db.close()
 
+    # To-do tools wrap the same transport-agnostic op_* functions the in-app
+    # starbot chat uses (chat.py), so both surfaces stay in sync. Imported
+    # locally: chat.py imports this module at ITS top level, so a module-level
+    # import here would be circular. By build time chat is fully loaded.
+    import chat as todos
+
+    @mcp.tool()
+    def list_todos(include_done: bool = False) -> list:
+        """List the current user's starbot to-dos (their Tasks board), sorted
+        by status, then priority, then due date. Set include_done=True to also
+        include completed items."""
+        db = SessionLocal()
+        try:
+            return todos.op_list_todos(db, _resolve_and_log(db, "list_todos"), include_done)
+        finally:
+            db.close()
+
+    @mcp.tool()
+    def add_todo(text: str, due: str = "", priority: str = "", source: str = "") -> dict:
+        """Add one to-do to the current user's Tasks board. due is an ISO date
+        (YYYY-MM-DD); priority is low, medium, or high (empty for none); source
+        is optional origin context shown on the card (e.g. 'Claude — site visit
+        recap'). If the user mentioned a deadline, pass it as due rather than
+        leaving it in the text."""
+        db = SessionLocal()
+        try:
+            created = todos.op_add_todos(
+                db, _resolve_and_log(db, "add_todo"),
+                [{"text": text, "due": due, "priority": priority, "source": source}],
+            )
+            if not created:
+                raise ValueError("text is required")
+            return created[0]
+        finally:
+            db.close()
+
+    @mcp.tool()
+    def update_todo(
+        todo_id: str,
+        text: Optional[str] = None,
+        due: Optional[str] = None,
+        status: Optional[str] = None,
+        priority: Optional[str] = None,
+    ) -> dict:
+        """Update fields on a to-do; only pass the fields to change. status is
+        one of: todo, in_progress, done — set status='done' to complete an
+        item (preferred over deleting it)."""
+        db = SessionLocal()
+        try:
+            return todos.op_update_todo(
+                db, _resolve_and_log(db, "update_todo"), todo_id,
+                text=text, due=due, status=status, priority=priority,
+            )
+        finally:
+            db.close()
+
+    @mcp.tool()
+    def delete_todo(todo_id: str) -> dict:
+        """Permanently delete a to-do. Destructive — to mark an item finished,
+        use update_todo with status='done' instead; only delete after the user
+        explicitly confirms removal."""
+        db = SessionLocal()
+        try:
+            return todos.op_delete_todo(db, _resolve_and_log(db, "delete_todo"), todo_id)
+        finally:
+            db.close()
+
     app = mcp.streamable_http_app()
 
     # Serve the protected-resource metadata explicitly so `resource` and
