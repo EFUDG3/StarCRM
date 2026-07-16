@@ -72,6 +72,23 @@ This file is the single source of truth for picking the project back up. Read it
 >   path-inserted form `/.well-known/oauth-protected-resource/mcp` at the ROOT
 >   (gets 404, falls back fine) — serving that alias would help other MCP
 >   clients that don't fall back.
+> - **Connector expanded to 10 tools (2026-07-15 evening, rev 21):** todo CRUD
+>   added — `list_todos` / `add_todo` / `update_todo` / `delete_todo` wrap the
+>   same chat.py op_* functions the in-app bot uses (`import chat` is LOCAL
+>   inside build_mcp_app; chat.py imports mcp_server at module level, so a
+>   top-level import would be circular). E2E verified: full add→list→done→
+>   delete round-trip through the live connector. Decision (Ethan): NO email/
+>   calendar tools in our connector — claude.ai's built-in Microsoft 365
+>   connector covers that in the same chat. Test-parsing note: FastMCP returns
+>   list results as one SSE text block PER item, not a single JSON array.
+> - **Usage telemetry LIVE (rev 20):** `events` table + fire-and-forget
+>   `telemetry.log_event` hooks (chat messages/tools, connector tools, CRM +
+>   todo + mileage mutations, sign-ins) + `/api/stats` aggregate endpoint
+>   (sign-in gated, counts only, `?days=N`). Baselines accrue from 2026-07-15;
+>   feeds the monthly value report for Salam. Status brief for the cost meeting:
+>   `Downloads/PersonalCRM/Starbot-Status-Brief-2026-07.docx` (one page; vendor
+>   cost is a fill-in blank). az CLI fix: `-X utf8` flag (NOT PYTHONUTF8 env —
+>   `-I` ignores it) stops the cp1252 ✓ crash in acr build log streaming.
 > - **Gotchas:** `az acr build` log streaming crashes on `✓` under cp1252 — set
 >   `PYTHONUTF8=1`; the build succeeds server-side anyway (`az acr task list-runs`).
 >   Local `backend/.env` still holds the dead secret — replace it if local M365
