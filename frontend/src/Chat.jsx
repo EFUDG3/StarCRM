@@ -41,6 +41,18 @@ const SUGGESTIONS = [
   "Summarize my unread email",
 ];
 
+// SharePoint/Outlook URLs often contain literal spaces, which makes
+// [name](url with spaces) invalid markdown — the link never renders and the
+// raw URL wraps (and breaks) across lines. Percent-encode spaces inside link
+// destinations before handing the text to ReactMarkdown. The backend now
+// encodes at the source too; this catches older saved chats and anything the
+// model writes on its own.
+const fixMarkdownLinks = (text) =>
+  (text || "").replace(
+    /\]\((https?:[^)\n]*)\)/g,
+    (_, url) => `](${url.replace(/ /g, "%20")})`,
+  );
+
 const loadChat = () => {
   try {
     const raw = sessionStorage.getItem(CHAT_KEY);
@@ -286,7 +298,7 @@ export default function StarbotChat() {
                           ),
                         }}
                       >
-                        {m.text}
+                        {fixMarkdownLinks(m.text)}
                       </ReactMarkdown>
                     </div>
                   ) : (

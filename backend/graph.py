@@ -61,6 +61,16 @@ def _strip_html(content: str) -> str:
     return re.sub(r"[ \t]+", " ", re.sub(r"\n\s*\n\s*", "\n\n", text)).strip()
 
 
+def _safe_url(url: str) -> str:
+    """Graph webUrl/webLink values can contain literal spaces and parentheses
+    (SharePoint paths like "Shared Documents/SOP's/Floor Prep SOP.docx").
+    Those characters make `[name](url)` invalid markdown, so the chat UI and
+    claude.ai render the raw text instead of a link. Encode just the breaking
+    characters; already-encoded sequences contain none of them and pass through
+    untouched."""
+    return (url or "").replace(" ", "%20").replace("(", "%28").replace(")", "%29")
+
+
 def _msg_summary(m: dict) -> dict:
     sender = (m.get("from") or {}).get("emailAddress") or {}
     return {
@@ -72,7 +82,7 @@ def _msg_summary(m: dict) -> dict:
         "isRead": m.get("isRead", True),
         "hasAttachments": m.get("hasAttachments", False),
         "importance": m.get("importance", "normal"),
-        "webLink": m.get("webLink", ""),
+        "webLink": _safe_url(m.get("webLink", "")),
         "conversationId": m.get("conversationId", ""),
     }
 
@@ -179,7 +189,7 @@ def list_calendar_events(token: str, start: str, end: str, top: int = 50) -> lis
                 for a in (e.get("attendees") or [])[:10]
             ],
             "preview": (e.get("bodyPreview") or "").strip()[:200],
-            "webLink": e.get("webLink", ""),
+            "webLink": _safe_url(e.get("webLink", "")),
         })
     return out
 
@@ -238,7 +248,7 @@ def search_files(token: str, query: str, top: int = 10) -> list[dict]:
                 out.append({
                     "name": res.get("name", ""),
                     "summary": _strip_html(hit.get("summary", "") or "")[:300],
-                    "webUrl": res.get("webUrl", ""),
+                    "webUrl": _safe_url(res.get("webUrl", "")),
                     "lastModified": res.get("lastModifiedDateTime", ""),
                     "modifiedBy": ((res.get("lastModifiedBy") or {}).get("user") or {}).get(
                         "displayName", ""
