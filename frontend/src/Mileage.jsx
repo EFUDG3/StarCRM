@@ -2,7 +2,9 @@
 // Route math runs server-side on Azure Maps; trips and places persist per
 // user in the DB (the old page lost its log on every refresh). The Places
 // rail is a self-building address book — filled by saved trips and by
-// scanning the user's own Outlook calendar for street addresses.
+// scanning the user's own Outlook calendar for street addresses. Scanned
+// addresses are day-stamped (visits), so the rail shows day groups and a
+// whole day's stops load into the trip form in one click.
 import { useEffect, useState } from "react";
 import {
   Plus, Trash2, Copy, MapPin, Calendar, Check, ChevronDown, ChevronUp,
@@ -27,12 +29,14 @@ const fmtMoney = (n) => `$${n.toFixed(2)}`;
 export default function MileageTracker() {
   const [me, setMe] = useState(null);
   const [places, setPlaces] = useState([]);
+  const [visits, setVisits] = useState([]); // day-stamped calendar addresses
   const [newIds, setNewIds] = useState(new Set());
   const [expandedIds, setExpandedIds] = useState(new Set()); // log rows showing all addresses
   const [rate, setRate] = useState(null); // null = not loaded; user edits stick
   const [trips, setTrips] = useState(null); // null = loading
 
   const [startAddr, setStartAddr] = useState(OFFICE);
+  const [tripDate, setTripDate] = useState(todayISO()); // travel day, not save day
   const [stops, setStops] = useState([""]);
   const [returnTrip, setReturnTrip] = useState(true);
   const [result, setResult] = useState(null); // /route response + its date
@@ -50,13 +54,15 @@ export default function MileageTracker() {
   }, []);
 
   const refresh = async () => {
-    const [pl, tr] = await Promise.all([
+    const [pl, tr, vs] = await Promise.all([
       api.listPlaces().catch(() => []),
       api.listTrips().catch(() => ({ rate: 0.7, trips: [] })),
+      api.listVisits().catch(() => []),
     ]);
     setPlaces(pl);
     setRate((cur) => (cur == null ? tr.rate : cur)); // don't clobber a custom rate
     setTrips(tr.trips);
+    setVisits(vs);
   };
 
   useEffect(() => {
@@ -91,7 +97,9 @@ export default function MileageTracker() {
     setSaved(false);
     try {
       const r = await api.mileageRoute(addresses);
-      setResult({ ...r, date: todayISO() }); // date auto-attached, like CRM entries
+      // The trip carries the TRAVEL day (form field, prefilled by "Load day"
+      // or today) — not the day the save button happened to be clicked.
+      setResult({ ...r, date: tripDate || todayISO() });
     } catch (e) {
       setError(e.message || "Route failed.");
       setResult(null);
@@ -127,6 +135,34 @@ export default function MileageTracker() {
     refresh();
   };
 
+  // --- Visits (day groups) ----------------------------------------------------
+  // visits arrive flat, newest day first; group them into [date, rows] pairs.
+  const visitDays = (() => {
+    const by = new Map();
+    visits.forEach((v) => {
+      if (!by.has(v.date)) by.set(v.date, []);
+      by.get(v.date).push(v);
+    });
+    return [...by.entries()].sort(([a], [b]) => b.localeCompare(a));
+  })();
+
+  const dayName = (iso) =>
+    new Date(iso + "T12:00:00").toLocaleDateString(undefined, { weekday: "short" });
+
+  // One click turns a scanned day into the trip form: its stops, its date.
+  const loadDay = (date, dayVisits) => {
+    setTripDate(date);
+    setStops(dayVisits.map((v) => v.address));
+    setResult(null);
+    setSaved(false);
+    setError("");
+  };
+
+  const removeVisit = async (v) => {
+    await api.deleteVisit(v.id).catch(() => {});
+    refresh();
+  };
+
   const scan = async () => {
     setScanBusy(true);
     setScanMsg("");
@@ -135,6 +171,7 @@ export default function MileageTracker() {
       setNewIds(new Set(r.new.map((p) => p.id)));
       const parts = [`${r.scanned} event${r.scanned === 1 ? "" : "s"} scanned`,
                      `${r.new.length} new place${r.new.length === 1 ? "" : "s"}`];
+      if (r.visits?.length) parts.push(`${r.visits.length} day-stamped stop${r.visits.length === 1 ? "" : "s"}`);
       if (r.skipped?.length) parts.push(`${r.skipped.length} not mappable`);
       setScanMsg(parts.join(" · "));
       refresh();
@@ -218,6 +255,16 @@ export default function MileageTracker() {
           </div>
           <div className="grid gap-3 sm:grid-cols-2 mb-3">
             <label className="block">
+              <span className={cap} style={{ color: SEA }}>Trip date</span>
+              <input
+                type="date"
+                className={field} style={bc}
+                value={tripDate}
+                onChange={(e) => setTripDate(e.target.value)}
+                title="The day this trip was driven — prefilled by 'Load day', saved with the trip."
+              />
+            </label>
+            <label className="block">
               <span className={cap} style={{ color: SEA }}>Rate ($/mile)</span>
               <input
                 type="number" step="0.01" min="0.01" max="5"
@@ -227,7 +274,7 @@ export default function MileageTracker() {
                 title="Reimbursement rate for THIS entry — saved with the trip. Default $0.70 (IRS standard)."
               />
             </label>
-            <label className="block">
+            <label className="block sm:col-span-2">
               <span className={cap} style={{ color: SEA }}>Start address</span>
               <input className={field} style={bc} list="mileage-places" value={startAddr} onChange={(e) => setStartAddr(e.target.value)} />
             </label>
@@ -410,6 +457,51 @@ export default function MileageTracker() {
           {scanMsg && <div className="font-mono text-[11px] mt-2" style={{ color: "#4a5a60" }}>{scanMsg}</div>}
         </div>
 
+        {/* Day groups: what the scan day-stamped. "Load day" rebuilds that
+            day's route in the trip form — date included. */}
+        {visitDays.length > 0 && (
+          <div className="mb-3">
+            <div className="font-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "#4a5a60" }}>
+              Scanned days
+            </div>
+            <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+              {visitDays.map(([date, dv]) => (
+                <div key={date} className="rounded overflow-hidden" style={{ border: "1px solid #e5e0d8" }}>
+                  <div className="flex items-center justify-between gap-2 px-2 py-1.5" style={{ background: MIST }}>
+                    <span className="font-mono text-[11px] font-bold">{dayName(date)} {date}</span>
+                    <button
+                      onClick={() => loadDay(date, dv)}
+                      className="px-2 py-0.5 rounded text-white text-[10px] font-medium shrink-0"
+                      style={{ background: SEA }}
+                      title="Fill the trip form with this day's stops and date"
+                    >
+                      Load day ({dv.length})
+                    </button>
+                  </div>
+                  <ul>
+                    {dv.map((v) => (
+                      <li key={v.id} className="group flex items-start gap-1 px-2 py-1 border-t bg-white" style={{ borderColor: "#eee9e2" }}>
+                        <button onClick={() => useAsStop(v.address)} className="starbot-wrap flex-1 min-w-0 text-left" title="Add as next stop">
+                          {v.label && <span className="block text-[11px] font-semibold leading-snug">{v.label}</span>}
+                          <span className="block text-[11px] leading-snug" style={{ color: "#4a5a60" }}>{v.address}</span>
+                        </button>
+                        <button onClick={() => removeVisit(v)} className="p-0.5 mt-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Remove this stop from this day">
+                          <Trash2 size={11} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {places.length > 0 && (
+          <div className="font-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "#4a5a60" }}>
+            Address book
+          </div>
+        )}
         <ul className="space-y-1.5 max-h-[30rem] overflow-y-auto pr-1">
           {places.map((p) => (
             <li key={p.id} className="group">

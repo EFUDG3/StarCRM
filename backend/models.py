@@ -37,6 +37,10 @@ def _trip_id() -> str:
     return "tr" + uuid.uuid4().hex[:11]
 
 
+def _visit_id() -> str:
+    return "v" + uuid.uuid4().hex[:12]
+
+
 class User(Base):
     """A profile that owns its own set of contacts. No password — selecting a
     user is a client-side switch for now. When SSO lands, this table gains the
@@ -164,6 +168,27 @@ class Place(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     owner = relationship("User", back_populates="places")
+
+
+class PlaceVisit(Base):
+    """A day-stamp on a place: 'the calendar had this user at this address on
+    this date'. Written by the calendar scan (one row per address+date, so
+    re-scanning a window never duplicates); read as day groups that load a
+    whole day's stops into the trip form. This is the bridge between calendar
+    events and the day-grouped mileage report."""
+
+    __tablename__ = "place_visits"
+
+    id = Column(String, primary_key=True, default=_visit_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    place_id = Column(
+        String, ForeignKey("places.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    date = Column(String, nullable=False)  # ISO date of the calendar event
+    label = Column(String, default="")     # event-derived, e.g. "Hernandez install"
+    created_at = Column(DateTime, server_default=func.now())
 
 
 class Event(Base):

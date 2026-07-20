@@ -131,6 +131,9 @@ export const addPlace = (address, label = "") =>
   sessionRequest("/api/mileage/places", { method: "POST", body: JSON.stringify({ address, label }) });
 export const deletePlace = (id) =>
   sessionRequest(`/api/mileage/places/${id}`, { method: "DELETE" });
+export const listVisits = () => sessionRequest("/api/mileage/visits");
+export const deleteVisit = (id) =>
+  sessionRequest(`/api/mileage/visits/${id}`, { method: "DELETE" });
 export const scanCalendar = (start, end) =>
   sessionRequest("/api/mileage/scan", { method: "POST", body: JSON.stringify({ start, end }) });
 

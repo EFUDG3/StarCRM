@@ -24,7 +24,26 @@ This file is the single source of truth for picking the project back up. Read it
 > (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
 > + Rate columns; own calendar only.
 
-> **Resume note (2026-07-15, LATEST) — connector server-side COMPLETE; only the claude.ai add remains.**
+> **Mileage day-stamping (2026-07-20) — stage 1 of the calendar → autofill → report flow.**
+> Target workflow (Ethan): pull calendar → parse which addresses belong to which dates →
+> one click autofills a day's miles → export in the Marc-format mileage log (reference:
+> `Downloads/Business-Vehicle-Mileage-marc week of 6-1-26 to 6-5-26.pdf` — columns Date of
+> Travel / Purpose of Travel (address) / odometer start+end / total miles, header with emp
+> name+ID+dept, rate, totals). Built in stages; stage 1 (this) = day-stamping.
+> - New `place_visits` table: one row per user+place+DATE (unique index
+>   `ix_place_visits_user_place_date` makes re-scans idempotent). Haiku scan prompt now
+>   returns `{date, label, address}` — address+date pairs, deduped per date.
+> - Scan behavior change: a known place visited again still records a visit (previously
+>   known addresses were skipped entirely). Endpoints: GET/DELETE `/api/mileage/visits`.
+> - UI: "Scanned days" day-group cards in the rail — **Load day** fills the stops AND the
+>   new **Trip date** field in the entry form (trips now carry the travel day, not the
+>   save-click day; needed for the day-grouped export). Places list captioned
+>   "Address book".
+> - Remaining stages: (2) one-click day autofill → calculated route without manual review
+>   (or batch "calculate whole week"), (3) Marc-format CSV/XLSX export (odometer columns
+>   derived or left blank — decide with Ethan), (4) maybe per-employee header info.
+>
+> **Resume note (2026-07-15) — connector server-side COMPLETE; only the claude.ai add remains.**
 > - **Entra:** App ID URI `https://starbot.starflooringandremodeling.com/mcp` ADDED
 >   (kept `api://<client-id>` too — Entra accepted it, verified-domain wall cleared).
 >   Redirect URI `https://claude.com/api/mcp/auth_callback` added alongside the

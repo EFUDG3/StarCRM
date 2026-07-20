@@ -10,12 +10,16 @@ couldn't exist as a static page:
   the same job site never re-geocode (long-project company: that's most visits).
 - "Scan my calendar" pulls the signed-in user's own Outlook events (delegated
   token, same as chat) and has Claude Haiku pull out California street
-  addresses — no STOP:-format discipline required from drivers.
+  addresses — no STOP:-format discipline required from drivers. Every address
+  is day-stamped: a place_visits row per address+date, so a scanned week
+  shows up as day groups and a whole day loads into the trip form in one
+  click (the first stage of the calendar → autofill → mileage-report flow).
 - Trips (a day's route) persist per user; the log survives refreshes and
   reports dollars at the configurable MILEAGE_RATE (IRS standard).
 """
 import json
 import os
+import re
 from datetime import datetime
 
 import httpx
@@ -26,7 +30,7 @@ import graph
 import m365
 import telemetry
 from database import get_db
-from models import Place, Trip, User
+from models import Place, PlaceVisit, Trip, User
 from schemas import PlaceIn, RouteIn, ScanIn, TripIn
 
 AZURE_MAPS_KEY = os.getenv("AZURE_MAPS_KEY", "")
@@ -36,6 +40,7 @@ ATLAS = "https://atlas.microsoft.com"
 MILEAGE_RATE = float(os.getenv("MILEAGE_RATE", "0.70"))
 OFFICE = "4610 Alvarado Canyon Rd, San Diego, CA 92120"
 _EXTRACT_MODEL = os.getenv("SCAN_MODEL", "claude-haiku-4-5")
+_ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 router = APIRouter(prefix="/api/mileage", tags=["mileage"])
 
@@ -113,6 +118,16 @@ def _ser_place(p: Place) -> dict:
         "source": p.source or "manual",
         "timesUsed": p.times_used or 0,
         "lastUsed": p.last_used or "",
+    }
+
+
+def _ser_visit(v: PlaceVisit, p: Place) -> dict:
+    return {
+        "id": v.id,
+        "date": v.date,
+        "placeId": p.id,
+        "address": p.address,
+        "label": v.label or p.label or "",
     }
 
 
@@ -286,9 +301,48 @@ def delete_place(
     db.commit()
 
 
+# --- Visits (day-stamped addresses from calendar scans) ----------------------
+@router.get("/visits")
+def list_visits(
+    user: User = Depends(m365.get_session_user),
+    db: Session = Depends(get_db),
+) -> list:
+    """Flat list, newest day first; within a day, calendar-event order (scan
+    inserts follow the event feed, which Graph sorts by start time). The
+    frontend groups these into day cards."""
+    rows = (
+        db.query(PlaceVisit, Place)
+        .join(Place, PlaceVisit.place_id == Place.id)
+        .filter(PlaceVisit.user_id == user.id)
+        .order_by(PlaceVisit.date.desc(), PlaceVisit.created_at.asc())
+        .limit(400)
+        .all()
+    )
+    return [_ser_visit(v, p) for v, p in rows]
+
+
+@router.delete("/visits/{visit_id}", status_code=204)
+def delete_visit(
+    visit_id: str,
+    user: User = Depends(m365.get_session_user),
+    db: Session = Depends(get_db),
+) -> None:
+    v = (
+        db.query(PlaceVisit)
+        .filter(PlaceVisit.id == visit_id, PlaceVisit.user_id == user.id)
+        .first()
+    )
+    if v is None:
+        raise HTTPException(status_code=404, detail="Visit not found")
+    db.delete(v)
+    db.commit()
+
+
 # --- Calendar scan -----------------------------------------------------------
-def _extract_places(events: list[dict]) -> list[dict]:
-    """One cheap Haiku call: free-form event text in, structured addresses out.
+def _extract_visits(events: list[dict]) -> list[dict]:
+    """One cheap Haiku call: free-form event text in, structured DAY-STAMPED
+    addresses out. Each address carries the date of the event it came from —
+    that pairing is what lets the UI rebuild a whole day's route later.
     This is what replaces the 'make everyone write STOP: lines' idea."""
     import chat  # local import: chat pulls in the whole tool stack
 
@@ -296,17 +350,20 @@ def _extract_places(events: list[dict]) -> list[dict]:
     prompt = (
         "Below are Outlook calendar events (subject, date, location field, body) "
         "for a flooring company employee in Southern California. Extract every "
-        "PHYSICAL STREET ADDRESS in California that the person likely drove to.\n"
+        "PHYSICAL STREET ADDRESS in California that the person likely drove to, "
+        "each paired with the date of the event it appears in.\n"
         "Rules:\n"
         "- Only real street addresses (street number + street name, city if present). "
         "If city/state are missing but it's clearly a San Diego-area address, append "
         "'San Diego, CA'.\n"
         "- Skip: Teams/Zoom links, phone numbers, emails, PO boxes, vague place names "
         "with no street address.\n"
+        "- date: the containing event's date, exactly as given (YYYY-MM-DD).\n"
         "- label: short human label from the event (e.g. 'Hernandez flooring install').\n"
-        "- Deduplicate identical addresses.\n"
-        'Reply with ONLY a JSON array: [{"label": "...", "address": "..."}] — no prose. '
-        "Reply [] if none.\n\n"
+        "- Deduplicate identical address+date pairs. The same address on different "
+        "dates is one entry PER date.\n"
+        'Reply with ONLY a JSON array: [{"date": "YYYY-MM-DD", "label": "...", '
+        '"address": "..."}] — no prose. Reply [] if none.\n\n'
         + json.dumps(events, ensure_ascii=False)
     )
     resp = client.messages.create(
@@ -323,7 +380,11 @@ def _extract_places(events: list[dict]) -> list[dict]:
     except json.JSONDecodeError:
         return []
     return [
-        {"label": str(i.get("label", ""))[:120], "address": str(i.get("address", ""))[:200]}
+        {
+            "label": str(i.get("label", ""))[:120],
+            "address": str(i.get("address", ""))[:200],
+            "date": str(i.get("date", ""))[:10],
+        }
         for i in items
         if isinstance(i, dict) and i.get("address")
     ]
@@ -338,31 +399,51 @@ def scan_calendar(
     token = m365.get_graph_token(user, db)
     events = graph.list_calendar_events_for_scan(token, payload.start, payload.end)
     if not events:
-        return {"scanned": 0, "new": [], "skipped": []}
+        return {"scanned": 0, "new": [], "visits": [], "skipped": []}
 
-    existing = {
-        (p.address or "").strip().lower()
+    known = {
+        (p.address or "").strip().lower(): p
         for p in db.query(Place).filter(Place.user_id == user.id).all()
     }
-    new_places, skipped = [], []
-    for item in _extract_places(events):
+    seen_visits = {
+        (v.place_id, v.date)
+        for v in db.query(PlaceVisit).filter(PlaceVisit.user_id == user.id).all()
+    }
+    new_places, new_visits, skipped = [], [], []
+    for item in _extract_visits(events):
         addr = item["address"].strip()
-        if addr.lower() in existing:
+        place = known.get(addr.lower())
+        if place is None:
+            try:
+                lat, lon = _geocode(addr)
+            except HTTPException:
+                skipped.append(addr)  # extraction found it, the map can't — surface it
+                continue
+            place = _upsert_place(db, user, addr, date="", lat=lat, lon=lon,
+                                  label=item["label"], source="calendar")
+            db.flush()  # assigns place.id, which the visit row needs
+            known[addr.lower()] = place
+            new_places.append(place)
+        # Day-stamp the address even when the place itself is old news — a
+        # known job site visited again is exactly what the day groups exist
+        # to capture. (address, date) pairs are recorded once, ever.
+        date = item.get("date") or ""
+        if not _ISO_DAY.match(date) or (place.id, date) in seen_visits:
             continue
-        try:
-            lat, lon = _geocode(addr)
-        except HTTPException:
-            skipped.append(addr)  # extraction found it, the map can't — surface it
-            continue
-        existing.add(addr.lower())
-        place = _upsert_place(db, user, addr, date="", lat=lat, lon=lon,
-                              label=item["label"], source="calendar")
-        new_places.append(place)
+        visit = PlaceVisit(user_id=user.id, place_id=place.id, date=date,
+                           label=item["label"])
+        db.add(visit)
+        seen_visits.add((place.id, date))
+        new_visits.append((visit, place))
     db.commit()
-    telemetry.log_event(user.id, "mileage", "calendar_scanned",
-                        f"{len(events)} events, {len(new_places)} new")
+    telemetry.log_event(
+        user.id, "mileage", "calendar_scanned",
+        f"{len(events)} events, {len(new_places)} new places, "
+        f"{len(new_visits)} visits",
+    )
     return {
         "scanned": len(events),
         "new": [_ser_place(p) for p in new_places],
+        "visits": [_ser_visit(v, p) for v, p in new_visits],
         "skipped": skipped,
     }

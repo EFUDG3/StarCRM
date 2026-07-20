@@ -71,6 +71,13 @@ def _ensure_schema() -> None:
         # pre-existing trips backfill to the IRS standard.
         conn.execute(text("ALTER TABLE trips ADD COLUMN IF NOT EXISTS rate DOUBLE PRECISION"))
         conn.execute(text("UPDATE trips SET rate = 0.70 WHERE rate IS NULL"))
+        # Mileage: calendar scans day-stamp addresses into place_visits (table
+        # itself comes from create_all). One row per user+place+date — the
+        # index makes re-scans idempotent even under concurrent requests.
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_place_visits_user_place_date "
+            "ON place_visits (user_id, place_id, date)"
+        ))
 
 
 _ensure_schema()
