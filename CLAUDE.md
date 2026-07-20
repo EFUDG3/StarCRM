@@ -46,9 +46,11 @@ This file is the single source of truth for picking the project back up. Read it
 >   shouldn't pay for; legal — IRS substantiation = date, from/to destinations, exact
 >   miles, business purpose per trip; odometer readings only at tax-year start/end).
 >   Rows = from→to legs with full addresses, grouped by day with day subtotals and a
->   monthly total — reads easier for HR. Purpose column = the Outlook event title
->   (visit labels store the subject verbatim as of 2026-07-20; older visits may hold
->   Haiku paraphrases). (4) maybe per-employee header info.
+>   monthly total — reads easier for HR. Purpose column = the visit label, generated as
+>   a **grounded hybrid** (decided with Ethan 2026-07-20 after trying verbatim): the
+>   Outlook event title when it's clear, composed from the event's own content when the
+>   title is vague/mistyped/blank, never invented details. (4) maybe per-employee
+>   header info.
 >
 > **Resume note (2026-07-15) — connector server-side COMPLETE; only the claude.ai add remains.**
 > - **Entra:** App ID URI `https://starbot.starflooringandremodeling.com/mcp` ADDED

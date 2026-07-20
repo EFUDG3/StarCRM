@@ -187,8 +187,9 @@ class PlaceVisit(Base):
         String, ForeignKey("places.id", ondelete="CASCADE"), nullable=False, index=True
     )
     date = Column(String, nullable=False)  # ISO date of the calendar event
-    # The event's title, verbatim — doubles as the IRS "business purpose"
-    # column on the exported mileage report.
+    # Short business-purpose label — the event's title when that's clear,
+    # otherwise composed from the event's own content (never invented).
+    # Doubles as the IRS "business purpose" column on the exported report.
     label = Column(String, default="")
     created_at = Column(DateTime, server_default=func.now())
 
