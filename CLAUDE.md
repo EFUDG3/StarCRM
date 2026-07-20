@@ -40,11 +40,15 @@ This file is the single source of truth for picking the project back up. Read it
 >   save-click day; needed for the day-grouped export). Places list captioned
 >   "Address book".
 > - Remaining stages: (2) one-click day autofill → calculated route without manual review
->   (or batch "calculate whole week"), (3) day-grouped CSV/XLSX export — **format is NOT
->   a straight Marc clone; Ethan says expect the columns to change before implementing**
->   (the Marc template has no home for to/from leg detail, and its odometer start/end
->   columns don't match our leg-miles data — design the column set with Ethan first),
->   (4) maybe per-employee header info.
+>   (or batch "calculate whole week"), (3) day-grouped CSV/XLSX export — **format DECIDED
+>   2026-07-20, NOT a Marc clone. NO odometer columns** (Ethan: unrealistic self-reporting,
+>   invites lying, and calculated distance already excludes gas stops / wrong turns we
+>   shouldn't pay for; legal — IRS substantiation = date, from/to destinations, exact
+>   miles, business purpose per trip; odometer readings only at tax-year start/end).
+>   Rows = from→to legs with full addresses, grouped by day with day subtotals and a
+>   monthly total — reads easier for HR. Purpose column = the Outlook event title
+>   (visit labels store the subject verbatim as of 2026-07-20; older visits may hold
+>   Haiku paraphrases). (4) maybe per-employee header info.
 >
 > **Resume note (2026-07-15) — connector server-side COMPLETE; only the claude.ai add remains.**
 > - **Entra:** App ID URI `https://starbot.starflooringandremodeling.com/mcp` ADDED
