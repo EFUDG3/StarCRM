@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import {
   Plus, Trash2, Copy, MapPin, Calendar, Check, ChevronDown, ChevronUp,
+  Route, ClipboardList,
 } from "lucide-react";
 import * as api from "./api.js";
 
@@ -34,6 +35,7 @@ export default function MileageTracker() {
   const [expandedIds, setExpandedIds] = useState(new Set()); // log rows showing all addresses
   const [rate, setRate] = useState(null); // null = not loaded; user edits stick
   const [trips, setTrips] = useState(null); // null = loading
+  const [subTab, setSubTab] = useState("entry"); // entry | log
 
   const [startAddr, setStartAddr] = useState(OFFICE);
   const [tripDate, setTripDate] = useState(todayISO()); // travel day, not save day
@@ -188,9 +190,14 @@ export default function MileageTracker() {
   // each trip's own stored rate.
   const effRate = rate == null || Number.isNaN(rate) ? 0.7 : rate;
 
-  const legsSummary = (t) => {
-    const dests = t.legs.length > 1 ? t.legs.slice(0, -1).map((l) => l.to) : [t.legs[0]?.to];
-    return dests.slice(0, 3).join(" · ") + (dests.length > 3 ? " …" : "");
+  // The stops actually visited. The return-to-start drive (when present) is
+  // not a stop — detected by the last drive ending where the trip began, so
+  // trips saved WITHOUT the round-trip box no longer lose their last stop in
+  // the summary.
+  const stopsOf = (t) => {
+    const dests = t.legs.map((l) => l.to);
+    if (dests.length > 1 && dests[dests.length - 1] === t.legs[0]?.from) dests.pop();
+    return dests;
   };
 
   const toggleExpanded = (id) =>
@@ -204,8 +211,7 @@ export default function MileageTracker() {
   const copyLog = () => {
     let text = "Date\tStops\tMiles\tRate\tAmount\n";
     (trips || []).slice().reverse().forEach((t) => {
-      const dests = t.legs.length > 1 ? t.legs.slice(0, -1).map((l) => l.to) : [t.legs[0]?.to];
-      text += `${t.date}\t${dests.join("; ")}\t${t.totalMiles.toFixed(1)}\t${t.rate.toFixed(2)}\t${t.dollars.toFixed(2)}\n`;
+      text += `${t.date}\t${stopsOf(t).join("; ")}\t${t.totalMiles.toFixed(1)}\t${t.rate.toFixed(2)}\t${t.dollars.toFixed(2)}\n`;
     });
     navigator.clipboard.writeText(text).catch(() => {});
   };
@@ -239,7 +245,28 @@ export default function MileageTracker() {
   const cap = "font-mono text-[10px] uppercase tracking-widest block mb-1";
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] items-start">
+    <div className="space-y-4">
+      {/* Sub-tabs: trip building and the saved log are separate pages — the
+          entry side already carries the places rail + day groups. Styled to
+          match the app header's segmented control. */}
+      <div className="flex w-fit gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid #cdd6d4" }}>
+        <button
+          onClick={() => setSubTab("entry")}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
+          style={subTab === "entry" ? { background: INK, color: "white" } : { background: "white", color: INK }}
+        >
+          <Route size={14} /> Trip entry
+        </button>
+        <button
+          onClick={() => setSubTab("log")}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
+          style={subTab === "log" ? { background: INK, color: "white" } : { background: "white", color: INK }}
+        >
+          <ClipboardList size={14} /> Log{(trips || []).length > 0 ? ` (${trips.length})` : ""}
+        </button>
+      </div>
+
+    <div className={subTab === "entry" ? "grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] items-start" : ""}>
       {/* shared autocomplete source for every stop input */}
       <datalist id="mileage-places">
         {places.map((p) => (
@@ -248,6 +275,7 @@ export default function MileageTracker() {
       </datalist>
 
       <div className="min-w-0 space-y-4">
+        {subTab === "entry" && (<>
         {/* Entry */}
         <section className="bg-white rounded-lg p-5 border-l-4" style={{ borderColor: SEA }}>
           <div className="font-mono text-xs uppercase tracking-widest mb-4" style={{ color: SEA }}>
@@ -362,9 +390,15 @@ export default function MileageTracker() {
             </div>
           </section>
         )}
+        </>)}
 
-        {/* Log */}
-        {(trips || []).length > 0 && (
+        {/* Log — its own page; the entry side stays focused on building trips */}
+        {subTab === "log" && (trips || []).length === 0 && (
+          <section className="text-sm text-center py-10 rounded bg-white" style={{ color: "#8b9a9f", border: "1px dashed #e5e0d8" }}>
+            No saved trips yet — build one on the Trip entry page and it lands here.
+          </section>
+        )}
+        {subTab === "log" && (trips || []).length > 0 && (
           <section className="bg-white rounded-lg p-5 border-l-4" style={{ borderColor: SEA }}>
             <div className="flex items-center justify-between mb-3">
               <span className="font-mono text-xs uppercase tracking-widest" style={{ color: SEA }}>Mileage log</span>
@@ -375,6 +409,7 @@ export default function MileageTracker() {
             <div className="space-y-2">
               {(trips || []).map((t) => {
                 const open = expandedIds.has(t.id);
+                const tripStops = stopsOf(t);
                 return (
                   <div key={t.id} className="group rounded px-3 py-2" style={{ border: "1px solid #e5e0d8" }}>
                     <div className="flex items-center justify-between gap-2">
@@ -386,12 +421,12 @@ export default function MileageTracker() {
                         <span className="font-mono text-xs font-bold shrink-0">{t.date}</span>
                         {!open && (
                           <span className="text-[13px] truncate" style={{ color: "#4a5a60" }}>
-                            {t.legs.length} leg{t.legs.length === 1 ? "" : "s"}: {legsSummary(t)}
+                            {tripStops.length} stop{tripStops.length === 1 ? "" : "s"}: {tripStops.slice(0, 3).join(" · ")}{tripStops.length > 3 ? " …" : ""}
                           </span>
                         )}
                         {open && (
                           <span className="text-[13px]" style={{ color: "#8b9a9f" }}>
-                            {t.legs.length} leg{t.legs.length === 1 ? "" : "s"}
+                            {tripStops.length} stop{tripStops.length === 1 ? "" : "s"}
                           </span>
                         )}
                       </button>
@@ -414,7 +449,8 @@ export default function MileageTracker() {
                         </div>
                         {t.legs.map((l, i) => (
                           <div key={i} className="flex items-baseline justify-between gap-3 text-[13px]">
-                            <span style={{ color: "#4a5a60" }}>{i + 1}. {l.to}</span>
+                            {/* i past the stop count = the drive back to start */}
+                            <span style={{ color: "#4a5a60" }}>{i + 1}. {l.to}{i >= tripStops.length ? " (return)" : ""}</span>
                             <span className="font-mono text-[12px] shrink-0" style={{ color: "#8b9a9f" }}>
                               {l.miles.toFixed(1)} mi · {l.minutes}m
                             </span>
@@ -434,6 +470,7 @@ export default function MileageTracker() {
       </div>
 
       {/* Places rail */}
+      {subTab === "entry" && (
       <aside className="bg-white rounded-lg p-4 border-l-4" style={{ borderColor: "#C8B89A" }}>
         <div className="flex items-center gap-2 mb-3">
           <MapPin size={16} style={{ color: SEA }} />
@@ -538,6 +575,8 @@ export default function MileageTracker() {
           Click a place to add it as a stop. Stop fields also autocomplete from this list.
         </div>
       </aside>
+      )}
+    </div>
     </div>
   );
 }

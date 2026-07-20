@@ -39,6 +39,13 @@ This file is the single source of truth for picking the project back up. Read it
 >   new **Trip date** field in the entry form (trips now carry the travel day, not the
 >   save-click day; needed for the day-grouped export). Places list captioned
 >   "Address book".
+> - UI cleanup (2026-07-20): mileage page has SUBTABS ("Trip entry" / "Log (N)", same
+>   segmented-control style as the app header) — the log lives on its own page now.
+>   Wording: "legs" → "stops" everywhere user-facing (lots of Spanish speakers; Ethan).
+>   Bugfix found during the rename: the log summary always dropped the last destination
+>   assuming it was the return drive — wrong for non-round-trips; stops are now derived
+>   by detecting whether the last drive ends where the trip began (`stopsOf`), and the
+>   expanded view marks the return drive "(return)".
 > - Remaining stages: (2) one-click day autofill → calculated route without manual review
 >   (or batch "calculate whole week"), (3) day-grouped CSV/XLSX export — **format DECIDED
 >   2026-07-20, NOT a Marc clone. NO odometer columns** (Ethan: unrealistic self-reporting,
