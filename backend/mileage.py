@@ -403,8 +403,25 @@ def scan_calendar(
     user: User = Depends(m365.get_session_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    # Normalize the window before it reaches Graph. Swapped dates are an
+    # obvious mistake (start 7/7, end 7/1 used to come back as a raw 500) —
+    # just fix them. The one-month cap keeps a fat-fingered year-wide scan
+    # from burning Haiku tokens on hundreds of events.
+    try:
+        s = datetime.strptime(payload.start, "%Y-%m-%d").date()
+        e = datetime.strptime(payload.end, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Scan dates must be YYYY-MM-DD")
+    if s > e:
+        s, e = e, s
+    if (e - s).days > 31:
+        raise HTTPException(
+            status_code=400,
+            detail="Scan window is limited to one month at a time — narrow the range",
+        )
+
     token = m365.get_graph_token(user, db)
-    events = graph.list_calendar_events_for_scan(token, payload.start, payload.end)
+    events = graph.list_calendar_events_for_scan(token, s.isoformat(), e.isoformat())
     if not events:
         return {"scanned": 0, "new": [], "visits": [], "skipped": []}
 
