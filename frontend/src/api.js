@@ -136,6 +136,27 @@ export const deleteVisit = (id) =>
   sessionRequest(`/api/mileage/visits/${id}`, { method: "DELETE" });
 export const scanCalendar = (start, end) =>
   sessionRequest("/api/mileage/scan", { method: "POST", body: JSON.stringify({ start, end }) });
+export const reportPreview = (start, end) =>
+  sessionRequest("/api/mileage/report/preview", { method: "POST", body: JSON.stringify({ start, end }) });
+// Returns a file, not JSON — hence not sessionRequest.
+export const reportDownload = async (start, end, dates) => {
+  const res = await fetch(`${BASE}/api/mileage/report/generate`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ start, end, dates }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json())?.detail || ""; } catch { /* ignore */ }
+    const err = new Error(detail || `API ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  const dispo = res.headers.get("Content-Disposition") || "";
+  const m = dispo.match(/filename="?([^";]+)/);
+  return { blob: await res.blob(), filename: m ? m[1] : "Mileage Report.xlsx" };
+};
 
 export const listTodos = (includeDone = false) =>
   sessionRequest(`/api/todos${includeDone ? "?include_done=true" : ""}`);

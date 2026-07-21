@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import {
   Plus, Trash2, Copy, MapPin, Calendar, Check, ChevronDown, ChevronUp,
-  Route, ClipboardList,
+  Route, ClipboardList, FileSpreadsheet,
 } from "lucide-react";
 import * as api from "./api.js";
 
@@ -20,6 +20,11 @@ const TIDE = "#C0392B";
 const OFFICE = "4610 Alvarado Canyon Rd, San Diego, CA 92120";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
+const firstOfMonthISO = () => todayISO().slice(0, 8) + "01";
+const lastDayOfMonthISO = (ym) => {
+  const [y, m] = ym.split("-").map(Number);
+  return `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+};
 const daysAgoISO = (n) => {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -55,6 +60,16 @@ export default function MileageTracker() {
   const [scanEnd, setScanEnd] = useState(todayISO());
   const [scanBusy, setScanBusy] = useState(false);
   const [scanMsg, setScanMsg] = useState("");
+
+  // Report tab: month-to-date by default; month picker fills the free dates.
+  const [repMonth, setRepMonth] = useState("");
+  const [repStart, setRepStart] = useState(firstOfMonthISO());
+  const [repEnd, setRepEnd] = useState(todayISO());
+  const [repData, setRepData] = useState(null); // /report/preview response
+  const [repExcluded, setRepExcluded] = useState(new Set());
+  const [repBusy, setRepBusy] = useState(false);
+  const [repMsg, setRepMsg] = useState("");
+  const [genBusy, setGenBusy] = useState(false);
 
   useEffect(() => {
     api.authMe().then(setMe).catch(() => setMe({ signedIn: false, configured: true }));
@@ -170,6 +185,95 @@ export default function MileageTracker() {
     refresh();
   };
 
+  // --- Report -----------------------------------------------------------------
+  const pullReport = async () => {
+    let s = repStart, e = repEnd;
+    if (s && e && s > e) {
+      [s, e] = [e, s]; // reversed dates are an obvious mistake — just fix them
+      setRepStart(s);
+      setRepEnd(e);
+    }
+    if ((new Date(e) - new Date(s)) / 86400000 > 31) {
+      setRepMsg("Range is limited to one month at a time — narrow it.");
+      return;
+    }
+    setRepBusy(true);
+    setRepMsg("");
+    setRepData(null);
+    setRepExcluded(new Set());
+    try {
+      const r = await api.reportPreview(s, e);
+      setRepData(r);
+      if (!r.days.length) setRepMsg("No calendar stops or logged trips found in this range.");
+      refresh(); // the preview scan may have added places/visits
+    } catch (err) {
+      setRepMsg(err.message || "Preview failed.");
+    }
+    setRepBusy(false);
+  };
+
+  const toggleRepDay = (d) =>
+    setRepExcluded((cur) => {
+      const next = new Set(cur);
+      if (next.has(d)) next.delete(d);
+      else next.add(d);
+      return next;
+    });
+
+  const repIncluded = (repData?.days || []).filter(
+    (d) => d.status !== "error" && !repExcluded.has(d.date),
+  );
+  const repMiles = repIncluded.reduce((s, d) => s + (d.totalMiles || 0), 0);
+  const repDollars = repIncluded.reduce((s, d) => s + (d.dollars || 0), 0);
+
+  // All destinations of a preview day, for display: saved days flatten their
+  // trips' legs; pending days already carry legs.
+  const repLegs = (d) =>
+    d.status === "saved" ? d.trips.flatMap((t) => t.legs) : d.legs || [];
+
+  const generateReport = async () => {
+    if (!repIncluded.length) return;
+    setGenBusy(true);
+    setRepMsg("");
+    try {
+      // Pending days become log entries first — the log is the source of
+      // truth, so the same report can be regenerated identically later.
+      for (const d of repIncluded) {
+        if (d.status === "pending") {
+          await api.saveTrip({
+            date: d.date,
+            legs: d.legs.map(({ purpose, ...leg }) => leg),
+            totalMiles: d.totalMiles,
+            rate: d.rate,
+            resolved: d.resolved,
+          });
+        }
+      }
+      const { blob, filename } = await api.reportDownload(
+        repStart, repEnd, repIncluded.map((d) => d.date),
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      setRepData((cur) => ({
+        ...cur,
+        days: cur.days.map((d) =>
+          d.status === "pending" && !repExcluded.has(d.date)
+            ? { ...d, status: "saved", trips: [{ legs: d.legs }] }
+            : d,
+        ),
+      }));
+      setRepMsg(`Downloaded ${filename} — ${repIncluded.length} day${repIncluded.length === 1 ? "" : "s"}, now in the log.`);
+      refresh();
+    } catch (err) {
+      setRepMsg(err.message || "Generate failed.");
+    }
+    setGenBusy(false);
+  };
+
   const scan = async () => {
     setScanBusy(true);
     setScanMsg("");
@@ -268,6 +372,13 @@ export default function MileageTracker() {
           style={subTab === "log" ? { background: INK, color: "white" } : { background: "white", color: INK }}
         >
           <ClipboardList size={14} /> Log{(trips || []).length > 0 ? ` (${trips.length})` : ""}
+        </button>
+        <button
+          onClick={() => setSubTab("report")}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
+          style={subTab === "report" ? { background: INK, color: "white" } : { background: "white", color: INK }}
+        >
+          <FileSpreadsheet size={14} /> Report
         </button>
       </div>
 
@@ -403,6 +514,140 @@ export default function MileageTracker() {
             No saved trips yet — build one on the Trip entry page and it lands here.
           </section>
         )}
+        {/* Report — pull a range, review the days, download the HR workbook */}
+        {subTab === "report" && (<>
+        <section className="bg-white rounded-lg p-5 border-l-4" style={{ borderColor: SEA }}>
+          <div className="font-mono text-xs uppercase tracking-widest mb-4" style={{ color: SEA }}>
+            Generate report
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3 mb-3">
+            <label className="block">
+              <span className={cap} style={{ color: SEA }}>Month</span>
+              <input
+                type="month" className={field} style={bc} value={repMonth}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setRepMonth(v);
+                  if (v) { setRepStart(`${v}-01`); setRepEnd(lastDayOfMonthISO(v)); }
+                }}
+                title="Quick-pick a whole month — or use the free dates."
+              />
+            </label>
+            <label className="block">
+              <span className={cap} style={{ color: SEA }}>Start</span>
+              <input type="date" className={field} style={bc} value={repStart}
+                onChange={(e) => { setRepStart(e.target.value); setRepMonth(""); }} />
+            </label>
+            <label className="block">
+              <span className={cap} style={{ color: SEA }}>End</span>
+              <input type="date" className={field} style={bc} value={repEnd}
+                onChange={(e) => { setRepEnd(e.target.value); setRepMonth(""); }} />
+            </label>
+          </div>
+          <button
+            onClick={pullReport}
+            disabled={repBusy}
+            className="w-full py-2.5 rounded text-white text-[15px] font-medium disabled:opacity-60"
+            style={{ background: SEA }}
+          >
+            {repBusy ? "Pulling calendar & calculating…" : "Pull & calculate"}
+          </button>
+          <div className="font-mono text-[11px] mt-2 leading-relaxed" style={{ color: "#8b9a9f" }}>
+            Scans your Outlook calendar for the range (max one month), keeps days already in the log
+            as-is, and route-calculates the rest for review below.
+          </div>
+          {repMsg && <div className="font-mono text-[12px] mt-2" style={{ color: "#4a5a60" }}>{repMsg}</div>}
+        </section>
+
+        {repData && repData.days.length > 0 && (
+          <section className="bg-white rounded-lg p-5 border-l-4" style={{ borderColor: "#C8B89A" }}>
+            <div className="font-mono text-xs uppercase tracking-widest mb-1" style={{ color: SEA }}>
+              Preview
+            </div>
+            <div className="text-[13px] mb-3" style={{ color: "#4a5a60" }}>
+              Uncheck any day you don't want in the report.
+            </div>
+            {repData.mixedRates && (
+              <div className="rounded p-2.5 text-[13px] mb-3" style={{ background: "#FDF6E3", color: "#8a6d1c", border: "1px solid #e6d9a8" }}>
+                Rates vary across these days — the report header will read VARIES and each day
+                will note its own rate.
+              </div>
+            )}
+            <div className="space-y-2">
+              {repData.days.map((d) => {
+                const excluded = repExcluded.has(d.date);
+                const failed = d.status === "error";
+                return (
+                  <div key={d.date} className="rounded overflow-hidden" style={{ border: "1px solid #e5e0d8", opacity: excluded ? 0.5 : 1 }}>
+                    <div className="flex items-center justify-between gap-2 px-3 py-2" style={{ background: MIST }}>
+                      <label className="flex items-center gap-2 cursor-pointer min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={!excluded && !failed}
+                          disabled={failed}
+                          onChange={() => toggleRepDay(d.date)}
+                          style={{ accentColor: SEA }}
+                        />
+                        <span className="font-mono text-[12px] font-bold whitespace-nowrap">{dayName(d.date)} {d.date}</span>
+                        <span
+                          className="font-mono text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded shrink-0"
+                          style={failed
+                            ? { background: "#FBEAE8", color: TIDE }
+                            : d.status === "saved"
+                              ? { background: "#E7F0ED", color: "#2F5D50" }
+                              : { background: "#FBEAE8", color: SEA }}
+                        >
+                          {failed ? "failed" : d.status === "saved" ? "in log" : "new"}
+                        </span>
+                      </label>
+                      {!failed && (
+                        <span className="flex items-baseline gap-2 shrink-0">
+                          <span className="font-mono text-[13px] font-medium">{d.totalMiles.toFixed(1)} mi</span>
+                          <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(d.dollars)}</span>
+                        </span>
+                      )}
+                    </div>
+                    {failed ? (
+                      <div className="px-3 py-2 text-[12px]" style={{ color: TIDE }}>
+                        {d.error} — fix it via Trip entry (Load day), then pull again.
+                      </div>
+                    ) : (
+                      <ul>
+                        {repLegs(d).map((l, i) => (
+                          <li key={i} className="starbot-wrap flex items-baseline justify-between gap-3 px-3 py-1 border-t bg-white text-[12px]" style={{ borderColor: "#eee9e2" }}>
+                            <span className="min-w-0" style={{ color: "#4a5a60" }}>
+                              {l.purpose ? <span className="font-semibold">{l.purpose}</span> : null}
+                              {l.purpose ? " · " : ""}{l.to}
+                            </span>
+                            <span className="font-mono shrink-0" style={{ color: "#8b9a9f" }}>{l.miles.toFixed(1)} mi</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t" style={{ borderColor: "#eee9e2" }}>
+              <span className="font-mono text-[13px]">
+                <b>{repIncluded.length}</b> day{repIncluded.length === 1 ? "" : "s"} ·{" "}
+                <b>{repMiles.toFixed(1)} mi</b> ·{" "}
+                <b style={{ color: "#2F5D50" }}>{fmtMoney(repDollars)}</b>
+              </span>
+              <button
+                onClick={generateReport}
+                disabled={genBusy || !repIncluded.length}
+                className="flex items-center gap-1.5 px-4 py-2 rounded text-white text-sm font-medium disabled:opacity-60"
+                style={{ background: INK }}
+              >
+                <FileSpreadsheet size={14} />
+                {genBusy ? "Generating…" : "Generate spreadsheet"}
+              </button>
+            </div>
+          </section>
+        )}
+        </>)}
+
         {subTab === "log" && (trips || []).length > 0 && (
           <section className="bg-white rounded-lg p-5 border-l-4" style={{ borderColor: SEA }}>
             <div className="flex items-center justify-between mb-3">

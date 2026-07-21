@@ -66,8 +66,25 @@ This file is the single source of truth for picking the project back up. Read it
 >   content (openpyxl files don't get Excel auto-fit), no shrink-to-fit; print = landscape
 >   at TRUE 100% scale (fitToPage off), column widths trimmed (C24/D27/E27) so the grid
 >   fits a letter page without scaling.
-> - Remaining stages: (2) one-click day autofill → calculated route without manual review
->   (or batch "calculate whole week"), (3) day-grouped CSV/XLSX export — **format DECIDED
+> - **STAGES 2+3 SHIPPED (2026-07-21): the Report subtab.** Pipeline (Ethan-approved):
+>   month picker OR free dates (both offered; 31-day cap shared with scan via
+>   `_normalize_window`, reversed dates auto-swap) → "Pull & calculate" =
+>   `POST /api/mileage/report/preview` (scans calendar via shared `_scan_window`, keeps
+>   logged days AS-IS — no recalc/no extra Maps spend — route-calculates visit-only days
+>   as 'pending'; per-day failures don't sink the preview) → checkbox day list with
+>   purposes/miles/dollars + mixed-rate warning → "Generate spreadsheet" saves pending
+>   days via the normal trips endpoint (LOG IS SOURCE OF TRUTH; reports regenerate
+>   identically) then `POST /api/mileage/report/generate` streams the xlsx.
+>   `backend/mileage_report.py` fills the VENDORED template
+>   `backend/assets/mileage_report_template.xlsx` (HR's file + approved rework baked in;
+>   grid overflow past row 38 copies row-10 styles; grand total floats, SUMIF on DAY
+>   TOTAL rows; mixed rates → header VARIES + per-day "@ $x/mi" notes + literal $ sum).
+>   openpyxl==3.1.5 added. Filename: "Mileage Report - {name} - {June 2026|range}.xlsx".
+>   Haiku scan max_tokens 1500→4000 (month-wide scans truncated the JSON). **openpyxl
+>   sheet-view gotcha:** freeze_panes=None leaves orphaned pane selection records →
+>   Excel "repairs" the file; fix = reset sheet_view.selection to A1 (baked into the
+>   vendored template).
+> - ~~Remaining~~ ORIGINAL plan for reference: (2) one-click day autofill, (3) export — **format DECIDED
 >   2026-07-20, NOT a Marc clone. NO odometer columns** (Ethan: unrealistic self-reporting,
 >   invites lying, and calculated distance already excludes gas stops / wrong turns we
 >   shouldn't pay for; legal — IRS substantiation = date, from/to destinations, exact

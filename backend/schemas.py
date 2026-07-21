@@ -85,3 +85,11 @@ class ScanIn(BaseModel):
     """Calendar scan window (ISO dates, inclusive)."""
     start: str
     end: str
+
+
+class ReportGenIn(BaseModel):
+    """Mileage report download: the window plus which logged days to include
+    (empty dates = every logged day in the window)."""
+    start: str
+    end: str
+    dates: list = []

@@ -20,3 +20,6 @@ mcp==1.12.0
 # graph.py imports it directly.
 msal==1.31.1
 httpx==0.28.1
+# Mileage report export: fills the vendored HR-format template
+# (assets/mileage_report_template.xlsx) with logged trips.
+openpyxl==3.1.5

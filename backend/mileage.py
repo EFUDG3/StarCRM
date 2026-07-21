@@ -17,21 +17,24 @@ couldn't exist as a static page:
 - Trips (a day's route) persist per user; the log survives refreshes and
   reports dollars at the configurable MILEAGE_RATE (IRS standard).
 """
+import calendar
 import json
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 import graph
 import m365
+import mileage_report
 import telemetry
 from database import get_db
 from models import Place, PlaceVisit, Trip, User
-from schemas import PlaceIn, RouteIn, ScanIn, TripIn
+from schemas import PlaceIn, ReportGenIn, RouteIn, ScanIn, TripIn
 
 AZURE_MAPS_KEY = os.getenv("AZURE_MAPS_KEY", "")
 ATLAS = "https://atlas.microsoft.com"
@@ -44,6 +47,26 @@ _EXTRACT_MODEL = os.getenv("SCAN_MODEL", "claude-haiku-4-5")
 _ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 router = APIRouter(prefix="/api/mileage", tags=["mileage"])
+
+
+def _normalize_window(start: str, end: str) -> tuple[date, date]:
+    """Shared guard for every date-ranged endpoint. Swapped dates are an
+    obvious mistake (start 7/7, end 7/1 used to come back as a raw 500) —
+    just fix them. The one-month cap keeps a fat-fingered year-wide scan
+    from burning Haiku tokens on hundreds of events."""
+    try:
+        s = datetime.strptime(start, "%Y-%m-%d").date()
+        e = datetime.strptime(end, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    if s > e:
+        s, e = e, s
+    if (e - s).days > 31:
+        raise HTTPException(
+            status_code=400,
+            detail="Range is limited to one month at a time — narrow it",
+        )
+    return s, e
 
 
 # --- Azure Maps --------------------------------------------------------------
@@ -375,7 +398,9 @@ def _extract_visits(events: list[dict]) -> list[dict]:
     )
     resp = client.messages.create(
         model=_EXTRACT_MODEL,
-        max_tokens=1500,
+        # Month-wide scans can surface 60+ address+date pairs; 1500 tokens
+        # truncated the JSON array mid-list.
+        max_tokens=4000,
         messages=[{"role": "user", "content": prompt}],
     )
     text = "".join(b.text for b in resp.content if b.type == "text")
@@ -403,23 +428,13 @@ def scan_calendar(
     user: User = Depends(m365.get_session_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    # Normalize the window before it reaches Graph. Swapped dates are an
-    # obvious mistake (start 7/7, end 7/1 used to come back as a raw 500) —
-    # just fix them. The one-month cap keeps a fat-fingered year-wide scan
-    # from burning Haiku tokens on hundreds of events.
-    try:
-        s = datetime.strptime(payload.start, "%Y-%m-%d").date()
-        e = datetime.strptime(payload.end, "%Y-%m-%d").date()
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Scan dates must be YYYY-MM-DD")
-    if s > e:
-        s, e = e, s
-    if (e - s).days > 31:
-        raise HTTPException(
-            status_code=400,
-            detail="Scan window is limited to one month at a time — narrow the range",
-        )
+    s, e = _normalize_window(payload.start, payload.end)
+    return _scan_window(user, db, s, e)
 
+
+def _scan_window(user: User, db: Session, s: date, e: date) -> dict:
+    """The scan core, shared by /scan and the report preview: pull events,
+    extract day-stamped addresses, upsert places, record visits."""
     token = m365.get_graph_token(user, db)
     events = graph.list_calendar_events_for_scan(token, s.isoformat(), e.isoformat())
     if not events:
@@ -471,3 +486,200 @@ def scan_calendar(
         "visits": [_ser_visit(v, p) for v, p in new_visits],
         "skipped": skipped,
     }
+
+
+# --- Report (calendar -> day routes -> HR-format workbook) --------------------
+def _visit_purposes(db: Session, user: User, lo: str, hi: str) -> dict:
+    """(date, lowercased address) -> business-purpose label, from the window's
+    day-stamped visits. This is how event titles reach the report's PURPOSE
+    column for trips that were saved from Load day."""
+    rows = (
+        db.query(PlaceVisit, Place)
+        .join(Place, PlaceVisit.place_id == Place.id)
+        .filter(PlaceVisit.user_id == user.id,
+                PlaceVisit.date >= lo, PlaceVisit.date <= hi)
+        .all()
+    )
+    return {
+        (v.date, (p.address or "").strip().lower()): (v.label or p.label or "")
+        for v, p in rows
+    }
+
+
+def _leg_purpose(leg: dict, i: int, n: int, start_addr: str,
+                 day: str, purposes: dict) -> str:
+    to = (leg.get("to") or "").strip()
+    if i == n - 1 and n > 1 and to.lower() == (start_addr or "").strip().lower():
+        return "Return to office"
+    return purposes.get((day, to.lower()), "")
+
+
+@router.post("/report/preview")
+def report_preview(
+    payload: ScanIn,
+    user: User = Depends(m365.get_session_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """The one-button pull: scan the window's calendar, then hand back every
+    day in it — days already in the log as-is (human-reviewed; no recalc, no
+    extra Maps spend), days with only calendar visits route-calculated as
+    'pending'. Nothing is saved here; the client saves the pending days the
+    user keeps checked when they hit Generate."""
+    s, e = _normalize_window(payload.start, payload.end)
+    scan = _scan_window(user, db, s, e)
+    lo, hi = s.isoformat(), e.isoformat()
+
+    vis_rows = (
+        db.query(PlaceVisit, Place)
+        .join(Place, PlaceVisit.place_id == Place.id)
+        .filter(PlaceVisit.user_id == user.id,
+                PlaceVisit.date >= lo, PlaceVisit.date <= hi)
+        .order_by(PlaceVisit.date.asc(), PlaceVisit.created_at.asc())
+        .all()
+    )
+    vis_by_day: dict[str, list] = {}
+    for v, p in vis_rows:
+        vis_by_day.setdefault(v.date, []).append((v, p))
+    purposes = {
+        (v.date, (p.address or "").strip().lower()): (v.label or p.label or "")
+        for v, p in vis_rows
+    }
+
+    trips = (
+        db.query(Trip)
+        .filter(Trip.user_id == user.id, Trip.date >= lo, Trip.date <= hi)
+        .order_by(Trip.date.asc(), Trip.created_at.asc())
+        .all()
+    )
+    trips_by_day: dict[str, list] = {}
+    for t in trips:
+        trips_by_day.setdefault(t.date, []).append(t)
+
+    days = []
+    for d in sorted(set(vis_by_day) | set(trips_by_day)):
+        if d in trips_by_day:
+            ser, miles, dollars = [], 0.0, 0.0
+            for t in trips_by_day[d]:
+                st = _ser_trip(t)
+                start_addr = st["legs"][0]["from"] if st["legs"] else ""
+                for i, leg in enumerate(st["legs"]):
+                    leg["purpose"] = _leg_purpose(leg, i, len(st["legs"]),
+                                                  start_addr, d, purposes)
+                ser.append(st)
+                miles += st["totalMiles"]
+                dollars += st["dollars"]
+            days.append({"date": d, "status": "saved", "trips": ser,
+                         "totalMiles": round(miles, 1),
+                         "dollars": round(dollars, 2)})
+            continue
+        pairs = vis_by_day[d]
+        addrs = [OFFICE] + [p.address for _, p in pairs] + [OFFICE]
+        try:
+            coords = [_coords_for(db, user, a) for a in addrs]
+            legs = _route_legs(coords, addrs)
+        except HTTPException as ex:
+            # One bad address shouldn't sink the whole month — surface the
+            # day as failed and keep going.
+            days.append({"date": d, "status": "error", "error": str(ex.detail),
+                         "stops": [p.address for _, p in pairs]})
+            continue
+        for i, leg in enumerate(legs):
+            leg["purpose"] = _leg_purpose(leg, i, len(legs), addrs[0], d, purposes)
+        total = round(sum(l["miles"] for l in legs), 1)
+        days.append({
+            "date": d, "status": "pending", "legs": legs,
+            "totalMiles": total, "rate": MILEAGE_RATE,
+            "dollars": round(total * MILEAGE_RATE, 2),
+            "resolved": [
+                {"address": a, "lat": c[0], "lon": c[1]}
+                for a, c in zip(addrs, coords)
+            ],
+        })
+
+    rates = {round(t.rate if t.rate is not None else MILEAGE_RATE, 4) for t in trips}
+    if any(day["status"] == "pending" for day in days):
+        rates.add(round(MILEAGE_RATE, 4))
+    telemetry.log_event(user.id, "mileage", "report_previewed", f"{len(days)} days")
+    return {
+        "days": days,
+        "scanned": scan["scanned"],
+        "newPlaces": len(scan["new"]),
+        "newVisits": len(scan["visits"]),
+        "skipped": scan["skipped"],
+        "mixedRates": len(rates) > 1,
+    }
+
+
+def _report_filename(name: str, s: date, e: date) -> str:
+    if s.day == 1 and e == date(s.year, s.month,
+                                calendar.monthrange(s.year, s.month)[1]):
+        span = s.strftime("%B %Y")
+    else:
+        span = f"{s.isoformat()} to {e.isoformat()}"
+    safe = "".join(ch for ch in (name or "") if ch.isalnum() or ch in " -_").strip()
+    return f"Mileage Report - {safe or 'mileage'} - {span}.xlsx"
+
+
+@router.post("/report/generate")
+def report_generate(
+    payload: ReportGenIn,
+    user: User = Depends(m365.get_session_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Build the HR-format workbook from LOGGED trips only — the log is the
+    source of truth, so the same report can be regenerated identically later.
+    The client saves any still-pending preview days before calling this."""
+    s, e = _normalize_window(payload.start, payload.end)
+    lo, hi = s.isoformat(), e.isoformat()
+    wanted = {d for d in payload.dates if lo <= d <= hi} if payload.dates else None
+
+    trips = [
+        t for t in db.query(Trip)
+        .filter(Trip.user_id == user.id, Trip.date >= lo, Trip.date <= hi)
+        .order_by(Trip.date.asc(), Trip.created_at.asc())
+        .all()
+        if wanted is None or t.date in wanted
+    ]
+    if not trips:
+        raise HTTPException(
+            status_code=400,
+            detail="No logged trips for the selected days — pull & calculate first",
+        )
+
+    purposes = _visit_purposes(db, user, lo, hi)
+    by_day: dict[str, list] = {}
+    for t in trips:
+        by_day.setdefault(t.date, []).append(t)
+
+    days, rates, total_dollars = [], set(), 0.0
+    for d in sorted(by_day):
+        rows, day_rate = [], MILEAGE_RATE
+        for t in by_day[d]:
+            legs = json.loads(t.legs_json)
+            start_addr = legs[0]["from"] if legs else ""
+            for i, leg in enumerate(legs):
+                rows.append({
+                    "purpose": _leg_purpose(leg, i, len(legs), start_addr, d, purposes),
+                    "frm": leg["from"],
+                    "to": leg["to"],
+                    "miles": leg["miles"],
+                })
+            rate = t.rate if t.rate is not None else MILEAGE_RATE
+            day_rate = round(rate, 4)
+            rates.add(day_rate)
+            total_dollars += t.total_miles * rate
+        days.append({"date": d, "rows": rows, "rate": day_rate})
+
+    header_rate = next(iter(rates)) if len(rates) == 1 else None
+    xlsx = mileage_report.build_report(user.name or "", days, header_rate,
+                                       total_dollars)
+    telemetry.log_event(user.id, "mileage", "report_generated",
+                        f"{len(days)} days, {len(trips)} trips")
+    return Response(
+        content=xlsx,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="{_report_filename(user.name, s, e)}"',
+        },
+    )
