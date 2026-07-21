@@ -60,7 +60,12 @@ This file is the single source of truth for picking the project back up. Read it
 >   `=SUMIF(E:E,"DAY TOTAL")` so legs never double-count, G5=F39, G6=G4*G5. Template
 >   quirks REMOVED on Ethan's request: freeze panes at A37 (rows 1-36 stayed on screen
 >   — the "annoying sticky header") and the oversized banner rows (shrunk). Implement
->   stage-3 export to match THIS file.
+>   stage-3 export to match THIS file. Final format feedback (Ethan, approved): EMP ID
+>   and DEPT stay BLANK (hand-written if HR wants them; name auto-fills from the
+>   signed-in user); every row fully visible — explicit row heights sized to wrapped
+>   content (openpyxl files don't get Excel auto-fit), no shrink-to-fit; print = landscape
+>   at TRUE 100% scale (fitToPage off), column widths trimmed (C24/D27/E27) so the grid
+>   fits a letter page without scaling.
 > - Remaining stages: (2) one-click day autofill → calculated route without manual review
 >   (or batch "calculate whole week"), (3) day-grouped CSV/XLSX export — **format DECIDED
 >   2026-07-20, NOT a Marc clone. NO odometer columns** (Ethan: unrealistic self-reporting,
