@@ -741,15 +741,17 @@ export default function MileageTracker() {
                 const tripStops = stopsOf(t);
                 return (
                   <div key={t.id} className="group rounded px-3 py-2" style={{ border: "1px solid #e5e0d8" }}>
-                    <div className="flex items-center justify-between gap-2">
+                    {/* flex-wrap + ml-auto: on a phone the number cluster drops
+                        to its own line instead of colliding with the summary. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <button
                         onClick={() => toggleExpanded(t.id)}
-                        className="flex items-baseline gap-3 min-w-0 text-left flex-1"
+                        className="flex items-baseline gap-2 min-w-0 text-left flex-1"
                         title={open ? "Hide addresses" : "Show all addresses"}
                       >
                         <span className="font-mono text-xs font-bold shrink-0">{t.date}</span>
                         {!open && (
-                          <span className="text-[13px] truncate" style={{ color: "#4a5a60" }}>
+                          <span className="text-[13px] truncate min-w-0" style={{ color: "#4a5a60" }}>
                             {tripStops.length} stop{tripStops.length === 1 ? "" : "s"}: {tripStops.slice(0, 3).join(" · ")}{tripStops.length > 3 ? " …" : ""}
                           </span>
                         )}
@@ -759,7 +761,7 @@ export default function MileageTracker() {
                           </span>
                         )}
                       </button>
-                      <span className="flex items-center gap-3 shrink-0">
+                      <span className="flex items-center gap-3 shrink-0 ml-auto">
                         <span className="font-mono text-[13px] font-medium">{t.totalMiles.toFixed(1)} mi</span>
                         <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(t.dollars)}</span>
                         <span className="font-mono text-[11px]" style={{ color: "#8b9a9f" }}>@ {fmtRate(t.rate)}</span>

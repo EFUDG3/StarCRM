@@ -134,7 +134,7 @@ export default function TaskBoard() {
         return (
           <section
             key={col.key}
-            className="bg-white rounded-lg p-3 min-h-[16rem]"
+            className="bg-white rounded-lg p-3 min-h-[16rem] min-w-0"
             style={{ border: "1px solid #e5e0d8", outline: dragId ? `2px dashed ${SEA}22` : "none" }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
@@ -222,7 +222,7 @@ export default function TaskBoard() {
                         </span>
                       )}
                       {t.source && (
-                        <span className="font-mono text-[10px] truncate max-w-full" style={{ color: "#8b9a9f" }}>
+                        <span className="font-mono text-[10px] truncate min-w-0 max-w-full" style={{ color: "#8b9a9f" }}>
                           {t.sourceLink ? (
                             <a href={t.sourceLink} target="_blank" rel="noreferrer" className="underline inline-flex items-center gap-0.5" style={{ color: SEA }}>
                               <Sparkles size={9} /> {t.source}

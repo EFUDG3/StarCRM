@@ -24,6 +24,47 @@ This file is the single source of truth for picking the project back up. Read it
 > (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
 > + Rate columns; own calendar only.
 
+> **Resume note (2026-07-21, LATEST) — mileage report pipeline SHIPPED; cold-start + concurrency + DB findings.**
+> - **Mileage stages 1-3 all live** (revision `starbot--0000027`; details in the mileage
+>   notes below). The calendar → day-stamp → one-click calculate → HR-format `.xlsx`
+>   workflow is complete and deployed. Rate ground truth is **$0.7250** (HR sheet), stored
+>   4-decimal. Report subtab: month-picker OR free dates (31-day cap, reversed dates
+>   auto-swap), "Pull & calculate", checkbox day review, "Add from log", "Generate
+>   spreadsheet". Zero-mile days auto-unchecked; office-address calendar events no longer
+>   day-stamped as drives.
+> - **Cold-start investigation (the "30s to wake" demo annoyance).** Root cause is NOT the
+>   DB and NOT our code: the Container App has `minReplicas: null` (=0, scales to zero),
+>   and the app's OWN startup is ~0.2s (uvicorn "Application startup complete" 215ms after
+>   "Waiting for application startup"). The 30s is pure Azure platform cold-start:
+>   scheduling a replica + pulling the image + importing the Python dep tree
+>   (anthropic/mcp/pillow/openpyxl/sqlalchemy). Nothing in our code to optimize.
+> - **DECISION (Ethan): business-hours cron pinger, NOT a DB migration and NOT minReplicas=1.**
+>   Plan: a free external cron (cron-job.org) GETs `https://starbot.starflooringandremodeling.com/`
+>   every 4 min, Mon-Fri **7:30am-3:30pm America/Los_Angeles**, keeping ONE replica warm
+>   during work hours; scales to zero off-hours (cold start is fine then). Ping `/` (static,
+>   NO DB) on purpose — hitting a DB endpoint would keep Neon awake all day and blow its
+>   free compute-hour allowance. Est. cost ~$1-2/mo at 0.5vCPU/1GiB, ~40hr/wk, mostly idle
+>   (brushes Azure's free monthly compute grant). minReplicas STAYS 0; nothing changed on
+>   Azure — ping-only. **Ethan is setting up the cron-job.org account (Claude can't create
+>   accounts); verify after by checking the revision replica count during the window.**
+>   Rejected: minReplicas=1 (~$10-15/mo, always-instant but new standing cost); pinging as
+>   a "free" trick (keeping a replica warm costs the same however triggered).
+> - **DB migration reasoning CHANGED.** Open item #7's original driver (card-image BYTEA
+>   blobs filling Neon's 0.5GB) is GONE — blobs were removed July 2026, DB is now all text
+>   (<100MB for years). Remaining reason to move off Neon is OWNERSHIP only (Neon is on a
+>   personal account; Azure Postgres Flexible Server ~$20.48/mo on StarSubscription cuts the
+>   personal tie for handoff). NOT urgent; nothing at risk on Neon. The 2026-07-09 DB
+>   decision note still holds if/when it happens (create server → pg_dump/restore → swap
+>   secret → keep Neon a week; password no `&`/`@`).
+> - **Concurrency analysis (for the record).** Route handlers are sync `def` → Starlette
+>   runs them in a ~40-thread pool (concurrent, NOT serialized). `database.py` uses default
+>   QueuePool (5 + 10 overflow = 15 conns/replica) with `pool_pre_ping=True`; Container Apps
+>   scales out to `maxReplicas=10`; Neon pooled (PgBouncer) endpoint absorbs clients;
+>   Postgres readers don't block readers. First limit anyone would hit = 15 concurrent
+>   DB-touching requests per replica (then brief pool wait), but a small-company internal
+>   tool is orders of magnitude below that. Azure consumption bursts out then shrinks — no
+>   standing cost from load. Growth knob = `pool_size`/`max_overflow` + Neon tier, not FastAPI.
+>
 > **Mileage day-stamping (2026-07-20) — stage 1 of the calendar → autofill → report flow.**
 > Target workflow (Ethan): pull calendar → parse which addresses belong to which dates →
 > one click autofills a day's miles → export in the Marc-format mileage log (reference:
