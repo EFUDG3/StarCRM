@@ -35,9 +35,10 @@ from schemas import PlaceIn, RouteIn, ScanIn, TripIn
 
 AZURE_MAPS_KEY = os.getenv("AZURE_MAPS_KEY", "")
 ATLAS = "https://atlas.microsoft.com"
-# IRS standard mileage rate, $/mile. Override with the MILEAGE_RATE env var
-# when the IRS updates it — no redeploy of code, just the env value.
-MILEAGE_RATE = float(os.getenv("MILEAGE_RATE", "0.70"))
+# Company reimbursement rate, $/mile — ground truth is HR's mileage sheet
+# ($0.7250, matches the Mileage Tracker 2026 template). Override with the
+# MILEAGE_RATE env var when HR updates it — no redeploy, just the env value.
+MILEAGE_RATE = float(os.getenv("MILEAGE_RATE", "0.725"))
 OFFICE = "4610 Alvarado Canyon Rd, San Diego, CA 92120"
 _EXTRACT_MODEL = os.getenv("SCAN_MODEL", "claude-haiku-4-5")
 _ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -139,7 +140,7 @@ def _ser_trip(t: Trip) -> dict:
         "date": t.date,
         "legs": legs,
         "totalMiles": t.total_miles,
-        "rate": round(rate, 2),
+        "rate": round(rate, 4),
         "dollars": round(t.total_miles * rate, 2),
     }
 
@@ -228,7 +229,9 @@ def save_trip(
         date=payload.date or "",
         legs_json=json.dumps(payload.legs),
         total_miles=round(float(payload.totalMiles), 1),
-        rate=round(float(payload.rate), 2),
+        # 4 decimals, not 2 — the company rate is $0.7250 and a 2-decimal
+        # round would silently store it as $0.72.
+        rate=round(float(payload.rate), 4),
     )
     db.add(trip)
     # Every visited stop becomes/updates a saved place — the office itself is

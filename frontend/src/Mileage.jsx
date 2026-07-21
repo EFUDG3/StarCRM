@@ -26,6 +26,11 @@ const daysAgoISO = (n) => {
   return d.toISOString().slice(0, 10);
 };
 const fmtMoney = (n) => `$${n.toFixed(2)}`;
+// Company rate is $0.7250 — 3 decimals when they matter, 2 when they don't.
+const fmtRate = (r) => {
+  const s = r.toFixed(3);
+  return `$${s.endsWith("0") ? s.slice(0, -1) : s}`;
+};
 
 export default function MileageTracker() {
   const [me, setMe] = useState(null);
@@ -58,7 +63,7 @@ export default function MileageTracker() {
   const refresh = async () => {
     const [pl, tr, vs] = await Promise.all([
       api.listPlaces().catch(() => []),
-      api.listTrips().catch(() => ({ rate: 0.7, trips: [] })),
+      api.listTrips().catch(() => ({ rate: 0.725, trips: [] })),
       api.listVisits().catch(() => []),
     ]);
     setPlaces(pl);
@@ -188,7 +193,7 @@ export default function MileageTracker() {
   // back-to-back saves can be different workers at different rates, so any
   // rolled-up number is meaningless. Dollars come from the server, priced at
   // each trip's own stored rate.
-  const effRate = rate == null || Number.isNaN(rate) ? 0.7 : rate;
+  const effRate = rate == null || Number.isNaN(rate) ? 0.725 : rate;
 
   // The stops actually visited. The return-to-start drive (when present) is
   // not a stop — detected by the last drive ending where the trip began, so
@@ -211,7 +216,7 @@ export default function MileageTracker() {
   const copyLog = () => {
     let text = "Date\tStops\tMiles\tRate\tAmount\n";
     (trips || []).slice().reverse().forEach((t) => {
-      text += `${t.date}\t${stopsOf(t).join("; ")}\t${t.totalMiles.toFixed(1)}\t${t.rate.toFixed(2)}\t${t.dollars.toFixed(2)}\n`;
+      text += `${t.date}\t${stopsOf(t).join("; ")}\t${t.totalMiles.toFixed(1)}\t${t.rate}\t${t.dollars.toFixed(2)}\n`;
     });
     navigator.clipboard.writeText(text).catch(() => {});
   };
@@ -295,11 +300,11 @@ export default function MileageTracker() {
             <label className="block">
               <span className={cap} style={{ color: SEA }}>Rate ($/mile)</span>
               <input
-                type="number" step="0.01" min="0.01" max="5"
+                type="number" step="0.0005" min="0.01" max="5"
                 className={field} style={bc}
-                value={rate ?? 0.7}
+                value={rate ?? 0.725}
                 onChange={(e) => setRate(parseFloat(e.target.value))}
-                title="Reimbursement rate for THIS entry — saved with the trip. Default $0.70 (IRS standard)."
+                title="Reimbursement rate for THIS entry — saved with the trip. Default $0.7250 (company rate, per HR's mileage sheet)."
               />
             </label>
             <label className="block sm:col-span-2">
@@ -433,7 +438,7 @@ export default function MileageTracker() {
                       <span className="flex items-center gap-3 shrink-0">
                         <span className="font-mono text-[13px] font-medium">{t.totalMiles.toFixed(1)} mi</span>
                         <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(t.dollars)}</span>
-                        <span className="font-mono text-[11px]" style={{ color: "#8b9a9f" }}>@ ${t.rate.toFixed(2)}</span>
+                        <span className="font-mono text-[11px]" style={{ color: "#8b9a9f" }}>@ {fmtRate(t.rate)}</span>
                         <button onClick={() => toggleExpanded(t.id)} className="p-1 rounded hover:bg-stone-100" style={{ color: INK }} title={open ? "Collapse" : "Expand addresses"}>
                           {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                         </button>

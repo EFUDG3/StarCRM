@@ -72,7 +72,7 @@ class TripIn(BaseModel):
     date: str
     legs: list
     totalMiles: float
-    rate: float = 0.70
+    rate: float = 0.725
     resolved: list = []
 
 

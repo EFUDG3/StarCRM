@@ -46,6 +46,21 @@ This file is the single source of truth for picking the project back up. Read it
 >   assuming it was the return drive — wrong for non-round-trips; stops are now derived
 >   by detecting whether the last drive ends where the trip began (`stopsOf`), and the
 >   expanded view marks the return drive "(return)".
+> - RATE ground truth (2026-07-21, Ethan): **$0.7250/mi** — matches HR's template
+>   (`Downloads/PersonalCRM/Mileage Tracker 2026.xlsx`, cell G4) and Marc's PDF. Code
+>   default changed 0.70 → 0.725 (env `MILEAGE_RATE` still overrides). Fixed a real bug
+>   with it: save/serialize rounded rate to 2 decimals, which would have stored 0.725 as
+>   0.72 — now 4 decimals; frontend shows 3 decimals when they matter (`fmtRate`), rate
+>   input step 0.0005. **Mixed rates in one report window: flag it** (header rate shows
+>   'varies', reimbursement sums per-trip dollars) — rates should stay consistent.
+> - EXPORT sample approved visually (CSV draft), then rebuilt as a styled workbook:
+>   `Downloads/PersonalCRM/Star Mileage Report 2026 - SAMPLE.xlsx` — a copy of HR's
+>   template with the SAME styling, restructured: ODOMETER START/END → ROUTE FROM/TO
+>   (addresses, wrapped, 30-wide), day-grouped rows + bold DAY TOTAL rows, grand total
+>   `=SUMIF(E:E,"DAY TOTAL")` so legs never double-count, G5=F39, G6=G4*G5. Template
+>   quirks REMOVED on Ethan's request: freeze panes at A37 (rows 1-36 stayed on screen
+>   — the "annoying sticky header") and the oversized banner rows (shrunk). Implement
+>   stage-3 export to match THIS file.
 > - Remaining stages: (2) one-click day autofill → calculated route without manual review
 >   (or batch "calculate whole week"), (3) day-grouped CSV/XLSX export — **format DECIDED
 >   2026-07-20, NOT a Marc clone. NO odometer columns** (Ethan: unrealistic self-reporting,
