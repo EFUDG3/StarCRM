@@ -768,7 +768,7 @@ export default function MileageTracker() {
                         <button onClick={() => toggleExpanded(t.id)} className="p-1 rounded hover:bg-stone-100" style={{ color: INK }} title={open ? "Collapse" : "Expand addresses"}>
                           {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                         </button>
-                        <button onClick={() => removeTrip(t)} className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-stone-100" style={{ color: TIDE }} title="Delete entry">
+                        <button onClick={() => removeTrip(t)} className="p-1 rounded hover-reveal hover:bg-stone-100" style={{ color: TIDE }} title="Delete entry">
                           <Trash2 size={13} />
                         </button>
                       </span>
@@ -853,7 +853,7 @@ export default function MileageTracker() {
                           {v.label && <span className="block text-[11px] font-semibold leading-snug">{v.label}</span>}
                           <span className="block text-[11px] leading-snug" style={{ color: "#4a5a60" }}>{v.address}</span>
                         </button>
-                        <button onClick={() => removeVisit(v)} className="p-0.5 mt-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Remove this stop from this day">
+                        <button onClick={() => removeVisit(v)} className="p-0.5 mt-0.5 rounded hover-reveal hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Remove this stop from this day">
                           <Trash2 size={11} />
                         </button>
                       </li>
@@ -890,7 +890,7 @@ export default function MileageTracker() {
                     {!p.timesUsed && !p.lastUsed && p.source === "calendar" && "from calendar"}
                   </div>
                 </button>
-                <button onClick={() => removePlace(p)} className="p-1 mt-1 rounded opacity-0 group-hover:opacity-100 hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Delete place">
+                <button onClick={() => removePlace(p)} className="p-1 mt-1 rounded hover-reveal hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Delete place">
                   <Trash2 size={12} />
                 </button>
               </div>

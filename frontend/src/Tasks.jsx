@@ -202,7 +202,7 @@ export default function TaskBoard() {
                       <div className="starbot-wrap text-[15px] leading-snug min-w-0" style={{ textDecoration: t.status === "done" ? "line-through" : "none" }}>
                         {t.text}
                       </div>
-                      <button onClick={() => remove(t)} title="Delete" className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-white shrink-0" style={{ color: TIDE }}>
+                      <button onClick={() => remove(t)} title="Delete" className="p-1 rounded hover-reveal hover:bg-white shrink-0" style={{ color: TIDE }}>
                         <Trash2 size={12} />
                       </button>
                     </div>
@@ -232,7 +232,7 @@ export default function TaskBoard() {
                       )}
                     </div>
 
-                    <div className="flex justify-between mt-1.5 opacity-0 group-hover:opacity-100">
+                    <div className="flex justify-between mt-1.5 hover-reveal">
                       <button
                         onClick={() => move(t, COLUMNS[colIdx - 1]?.key)}
                         disabled={colIdx === 0}

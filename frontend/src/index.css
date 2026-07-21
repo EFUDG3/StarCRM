@@ -47,3 +47,14 @@ html {
 .starbot-md { overflow-wrap: anywhere; }
 .starbot-md a { word-break: break-all; }
 .starbot-wrap { overflow-wrap: anywhere; }
+
+/* Row action buttons (delete / rename / move) reveal on hover on pointer
+   devices, but stay visible on touch screens (which have no hover), so mobile
+   users can actually reach them. Replaces the bare `opacity-0
+   group-hover:opacity-100` pattern, which left these unusable on phones. */
+.hover-reveal { opacity: 1; }
+@media (hover: hover) {
+  .hover-reveal { opacity: 0; transition: opacity 0.12s ease; }
+  .group:hover .hover-reveal { opacity: 1; }
+  .group:focus-within .hover-reveal { opacity: 1; }
+}

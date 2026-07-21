@@ -746,10 +746,10 @@ function UserSwitcher({ users, userId, onSwitch, onAdd, onRename, onDelete }) {
                   {u.id === userId ? <Check size={14} style={{ color: SEA }} /> : <span style={{ width: 14, display: "inline-block" }} />}
                   <span className="truncate">{u.name}</span>
                 </button>
-                <button onClick={() => onRename(u.id, u.name)} title="Rename" className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-stone-100 rounded">
+                <button onClick={() => onRename(u.id, u.name)} title="Rename" className="p-1.5 hover-reveal hover:bg-stone-100 rounded">
                   <Pencil size={13} />
                 </button>
-                <button onClick={() => onDelete(u.id)} title="Delete" className="p-1.5 mr-1 opacity-0 group-hover:opacity-100 hover:bg-stone-100 rounded" style={{ color: TIDE }}>
+                <button onClick={() => onDelete(u.id)} title="Delete" className="p-1.5 mr-1 hover-reveal hover:bg-stone-100 rounded" style={{ color: TIDE }}>
                   <Trash2 size={13} />
                 </button>
               </div>

@@ -395,7 +395,7 @@ export default function StarbotChat() {
                     : t.source)}
                 </div>
               </div>
-              <button onClick={() => removeTodo(t)} className="p-1 opacity-0 group-hover:opacity-100 rounded hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Delete">
+              <button onClick={() => removeTodo(t)} className="p-1 hover-reveal rounded hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Delete">
                 <Trash2 size={12} />
               </button>
             </li>
