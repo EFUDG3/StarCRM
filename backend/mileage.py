@@ -43,6 +43,9 @@ ATLAS = "https://atlas.microsoft.com"
 # MILEAGE_RATE env var when HR updates it — no redeploy, just the env value.
 MILEAGE_RATE = float(os.getenv("MILEAGE_RATE", "0.725"))
 OFFICE = "4610 Alvarado Canyon Rd, San Diego, CA 92120"
+# Street part only, lowercased — calendar events list the office with and
+# without the ZIP, so prefix-matching catches every variant.
+_OFFICE_PREFIX = OFFICE.split(",")[0].lower()
 _EXTRACT_MODEL = os.getenv("SCAN_MODEL", "claude-haiku-4-5")
 _ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -451,6 +454,10 @@ def _scan_window(user: User, db: Session, s: date, e: date) -> dict:
     new_places, new_visits, skipped = [], [], []
     for item in _extract_visits(events):
         addr = item["address"].strip()
+        # Events AT the office aren't drives — without this, office-only
+        # meetings ("piece rate" etc.) became 0-mile days in the report.
+        if addr.lower().startswith(_OFFICE_PREFIX):
+            continue
         place = known.get(addr.lower())
         if place is None:
             try:
@@ -630,23 +637,22 @@ def report_generate(
     source of truth, so the same report can be regenerated identically later.
     The client saves any still-pending preview days before calling this."""
     s, e = _normalize_window(payload.start, payload.end)
-    lo, hi = s.isoformat(), e.isoformat()
-    wanted = {d for d in payload.dates if lo <= d <= hi} if payload.dates else None
-
-    trips = [
-        t for t in db.query(Trip)
-        .filter(Trip.user_id == user.id, Trip.date >= lo, Trip.date <= hi)
-        .order_by(Trip.date.asc(), Trip.created_at.asc())
-        .all()
-        if wanted is None or t.date in wanted
-    ]
+    q = db.query(Trip).filter(Trip.user_id == user.id)
+    if payload.dates:
+        # Explicit day list — "Add from log" days may sit outside the picked
+        # window, so the list wins over the window filter.
+        q = q.filter(Trip.date.in_([str(d) for d in payload.dates]))
+    else:
+        q = q.filter(Trip.date >= s.isoformat(), Trip.date <= e.isoformat())
+    trips = q.order_by(Trip.date.asc(), Trip.created_at.asc()).all()
     if not trips:
         raise HTTPException(
             status_code=400,
             detail="No logged trips for the selected days — pull & calculate first",
         )
 
-    purposes = _visit_purposes(db, user, lo, hi)
+    dates_present = sorted({t.date for t in trips})
+    purposes = _visit_purposes(db, user, dates_present[0], dates_present[-1])
     by_day: dict[str, list] = {}
     for t in trips:
         by_day.setdefault(t.date, []).append(t)

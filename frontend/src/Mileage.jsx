@@ -69,6 +69,7 @@ export default function MileageTracker() {
   const [repExcluded, setRepExcluded] = useState(new Set());
   const [repBusy, setRepBusy] = useState(false);
   const [repMsg, setRepMsg] = useState("");
+  const [repAddOpen, setRepAddOpen] = useState(false); // "Add from log" picker
   const [genBusy, setGenBusy] = useState(false);
 
   useEffect(() => {
@@ -201,15 +202,50 @@ export default function MileageTracker() {
     setRepMsg("");
     setRepData(null);
     setRepExcluded(new Set());
+    setRepAddOpen(false);
     try {
       const r = await api.reportPreview(s, e);
       setRepData(r);
+      // Zero-mile days (e.g. everything geocoded onto one spot) start
+      // unchecked — they add noise, not reimbursement. Re-checkable.
+      setRepExcluded(new Set(
+        r.days.filter((d) => d.status !== "error" && !(d.totalMiles > 0)).map((d) => d.date),
+      ));
       if (!r.days.length) setRepMsg("No calendar stops or logged trips found in this range.");
       refresh(); // the preview scan may have added places/visits
     } catch (err) {
       setRepMsg(err.message || "Preview failed.");
     }
     setRepBusy(false);
+  };
+
+  // Logged days not covered by the preview — candidates for "Add from log"
+  // (e.g. a manually entered trip that never came from the calendar).
+  const logCandidates = (() => {
+    if (!repData) return [];
+    const inPreview = new Set(repData.days.map((d) => d.date));
+    const by = new Map();
+    (trips || []).forEach((t) => {
+      if (inPreview.has(t.date)) return;
+      if (!by.has(t.date)) by.set(t.date, []);
+      by.get(t.date).push(t);
+    });
+    return [...by.entries()].sort(([a], [b]) => b.localeCompare(a));
+  })();
+
+  const addLogDay = (date, dayTrips) => {
+    const miles = dayTrips.reduce((s, t) => s + t.totalMiles, 0);
+    const dollars = dayTrips.reduce((s, t) => s + t.dollars, 0);
+    setRepData((cur) => ({
+      ...cur,
+      days: [...cur.days, {
+        date,
+        status: "saved",
+        trips: dayTrips,
+        totalMiles: Math.round(miles * 10) / 10,
+        dollars: Math.round(dollars * 100) / 100,
+      }].sort((a, b) => a.date.localeCompare(b.date)),
+    }));
   };
 
   const toggleRepDay = (d) =>
@@ -628,21 +664,64 @@ export default function MileageTracker() {
                 );
               })}
             </div>
-            <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t" style={{ borderColor: "#eee9e2" }}>
+            {repAddOpen && (
+              <div className="rounded p-3 mt-4" style={{ background: MIST, border: "1px solid #e5e0d8" }}>
+                <div className="font-mono text-[10px] uppercase tracking-widest mb-2" style={{ color: "#4a5a60" }}>
+                  Logged trips not in this report — click to add
+                </div>
+                {logCandidates.length === 0 ? (
+                  <div className="text-[12px]" style={{ color: "#8b9a9f" }}>
+                    Every logged trip is already covered by this report.
+                  </div>
+                ) : (
+                  <ul className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                    {logCandidates.map(([date, dayTrips]) => (
+                      <li key={date}>
+                        <button
+                          onClick={() => addLogDay(date, dayTrips)}
+                          className="w-full flex items-baseline gap-3 text-left rounded px-2 py-1.5 bg-white hover:shadow-sm"
+                          style={{ border: "1px solid #e5e0d8" }}
+                          title="Add this day to the report"
+                        >
+                          <span className="font-mono text-[12px] font-bold shrink-0">{dayName(date)} {date}</span>
+                          <span className="text-[12px] truncate flex-1 min-w-0" style={{ color: "#4a5a60" }}>
+                            {dayTrips.map((t) => stopsOf(t)).flat().slice(0, 3).join(" · ")}
+                          </span>
+                          <span className="font-mono text-[12px] shrink-0">
+                            {dayTrips.reduce((s, t) => s + t.totalMiles, 0).toFixed(1)} mi
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-3 border-t" style={{ borderColor: "#eee9e2" }}>
               <span className="font-mono text-[13px]">
                 <b>{repIncluded.length}</b> day{repIncluded.length === 1 ? "" : "s"} ·{" "}
                 <b>{repMiles.toFixed(1)} mi</b> ·{" "}
                 <b style={{ color: "#2F5D50" }}>{fmtMoney(repDollars)}</b>
               </span>
-              <button
-                onClick={generateReport}
-                disabled={genBusy || !repIncluded.length}
-                className="flex items-center gap-1.5 px-4 py-2 rounded text-white text-sm font-medium disabled:opacity-60"
-                style={{ background: INK }}
-              >
-                <FileSpreadsheet size={14} />
-                {genBusy ? "Generating…" : "Generate spreadsheet"}
-              </button>
+              <span className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setRepAddOpen((v) => !v)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded text-sm font-medium"
+                  style={{ background: MIST, color: INK }}
+                  title="Include a logged trip the calendar pull didn't cover"
+                >
+                  <Plus size={14} /> Add from log
+                </button>
+                <button
+                  onClick={generateReport}
+                  disabled={genBusy || !repIncluded.length}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded text-white text-sm font-medium disabled:opacity-60"
+                  style={{ background: INK }}
+                >
+                  <FileSpreadsheet size={14} />
+                  {genBusy ? "Generating…" : "Generate spreadsheet"}
+                </button>
+              </span>
             </div>
           </section>
         )}

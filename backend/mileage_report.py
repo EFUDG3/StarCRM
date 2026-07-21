@@ -80,6 +80,11 @@ def build_report(user_name: str, days: list, header_rate: float | None,
                     _lines(row["to"], 27))
             ws.row_dimensions[r].height = 6 + n * 13.5
             r += 1
+        # Outline the WHOLE day-total row (and the spacer under it) — past
+        # the template's pre-styled grid, cells that aren't written would
+        # otherwise show up borderless next to the day's total.
+        for c in range(2, 8):
+            styled(r, c)
         styled(r, 2, d).number_format = "m/d/yyyy"
         lab = styled(r, 5, "DAY TOTAL")
         a = copy(lab.alignment)
@@ -93,7 +98,10 @@ def build_report(user_name: str, days: list, header_rate: float | None,
             styled(r, 7, f"@ {_fmt_rate(day['rate'])}/mi")
         ws.row_dimensions[r].height = 18
         last_day_total = r
-        r += 2  # blank spacer row between days
+        r += 1
+        for c in range(2, 8):
+            styled(r, c)  # blank spacer row between days keeps the grid look
+        r += 1
 
     # Grand total: SUMIF over the DAY TOTAL rows only, so leg rows are never
     # double-counted. Position floats with the data; styles come from the
