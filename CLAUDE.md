@@ -24,7 +24,28 @@ This file is the single source of truth for picking the project back up. Read it
 > (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
 > + Rate columns; own calendar only.
 
-> **Resume note (2026-07-21, LATEST) — mileage report pipeline SHIPPED; cold-start + concurrency + DB findings.**
+> **Resume note (2026-07-23, LATEST) — starbot chat can search the web.**
+> - Added Anthropic's **server-side web search** to the chat agent loop
+>   (`backend/chat.py`) for current/general/referential questions the user's M365
+>   data can't answer. Tool: `WEB_SEARCH_TOOL = {type: web_search_20250305, name:
+>   web_search, max_uses: 5}` — the BASIC variant on purpose (the dynamic-filtering
+>   `_20260209` needs an Opus/Sonnet tier; prod `CHAT_MODEL=claude-haiku-4-5`).
+>   `max_uses:5` caps spend (~$10/1000 searches). Passed as `_API_TOOLS = TOOLS +
+>   [WEB_SEARCH_TOOL]`; it never hits `_run_tool` (Anthropic executes it inline).
+> - **Loop changes for a server-side tool:** the stream now iterates raw events
+>   (not `text_stream`) so a search surfaces a `{type:tool,name:web_search}` chip
+>   mid-answer; `pause_turn` is handled (re-send to resume, no client tool_result);
+>   `_clean_blocks` now PRESERVES `server_tool_use` + `web_search_tool_result`
+>   (via `model_dump`) and text `citations` — needed so a paused turn resumes and
+>   next-turn replay stays consistent. Frontend: `web_search` chip = Globe icon.
+> - **Dependency bump: `anthropic` 0.40.0 → 0.118.0** (0.40 predates the web-search
+>   block types — the SDK couldn't parse `server_tool_use`/`web_search_tool_result`).
+>   `pip check` clean against pinned httpx/mcp/fastapi. Verified live on Haiku 4.5:
+>   search runs, streams, cites, and the cleaned history replays cleanly. Low-risk
+>   smoke-test after deploy: card scan + mileage calendar extraction still use
+>   `messages.create` (stable API across the bump).
+>
+> **Resume note (2026-07-21) — mileage report pipeline SHIPPED; cold-start + concurrency + DB findings.**
 > - **Mileage stages 1-3 all live** (revision `starbot--0000027`; details in the mileage
 >   notes below). The calendar → day-stamp → one-click calculate → HR-format `.xlsx`
 >   workflow is complete and deployed. Rate ground truth is **$0.7250** (HR sheet), stored

@@ -311,6 +311,14 @@ TOOLS = [
     },
 ]
 
+# Anthropic server-side web search: Claude issues the query, Anthropic runs it
+# and returns cited results in the same turn — there's no client tool to
+# execute (it never reaches _run_tool). Basic `_20250305` variant on purpose:
+# the newer dynamic-filtering `_20260209` needs an Opus/Sonnet tier, and prod
+# runs Haiku 4.5 (CHAT_MODEL). max_uses caps spend (~$10 / 1000 searches).
+WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
+_API_TOOLS = [*TOOLS, WEB_SEARCH_TOOL]
+
 
 def _system_prompt(user: User) -> str:
     today = date_cls.today().isoformat()
@@ -321,12 +329,19 @@ def _system_prompt(user: User) -> str:
 
 You can read the user's Outlook email and calendar, search company SharePoint/OneDrive \
 files, manage their starbot to-do list, and look up their Star CRM contacts — via tools, \
-always scoped to this signed-in user.
+always scoped to this signed-in user. You can also search the web for current or general \
+information that isn't in the user's own data.
 
 Rules:
 - CITE SOURCES. When an answer draws on an email, event, or file, cite it inline as a \
 markdown link, e.g. [RE: 4620 walkthrough](webLink) — use each item's webLink. Never \
 invent a link or a fact you didn't read from a tool result.
+- WEB SEARCH: use it for external facts the user's M365 data can't answer — current events, \
+prices, product specs, codes/regulations, vendor lookups, general reference. Cite web \
+results inline as markdown links to the source URL, same as any other source. Prefer the \
+user's own email/calendar/files/CRM for anything internal; reach for the web only when the \
+answer lives outside Star's data. Don't search for things you already know confidently \
+unless the user wants current or verified info.
 - To-do requests ("make a to-do list from my emails"): call list_todos first, then scan \
 list_recent_emails (and the calendar when relevant), propose clear action items with due \
 dates when the email implies one, and add them with add_todos including source + \
@@ -426,13 +441,24 @@ def _apply_cache_breakpoints(messages: list[dict]) -> None:
 
 def _clean_blocks(content) -> list[dict]:
     """Project SDK content blocks down to the exact fields the API accepts when
-    the conversation is replayed next turn."""
+    the conversation is replayed next turn.
+
+    Web-search blocks are preserved faithfully (model_dump): the trailing
+    server_tool_use is what lets a paused turn resume, and keeping the
+    web_search_tool_result alongside the citations that reference it keeps the
+    next turn's replay internally consistent."""
     out = []
     for b in content:
         if b.type == "text":
-            out.append({"type": "text", "text": b.text})
+            block = {"type": "text", "text": b.text}
+            cites = getattr(b, "citations", None)
+            if cites:
+                block["citations"] = [c.model_dump(mode="json", exclude_none=True) for c in cites]
+            out.append(block)
         elif b.type == "tool_use":
             out.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
+        elif b.type in ("server_tool_use", "web_search_tool_result"):
+            out.append(b.model_dump(mode="json", exclude_none=True))
     return out
 
 
@@ -467,14 +493,26 @@ def stream_chat(messages: list[dict], user_id: str, graph_token: str):
                 model=CHAT_MODEL,
                 max_tokens=_MAX_TOKENS,
                 system=system,
-                tools=TOOLS,
+                tools=_API_TOOLS,
                 messages=messages,
             ) as stream:
-                for text in stream.text_stream:
-                    yield _sse({"type": "text", "text": text})
+                # Iterate raw events (not text_stream) so a server-side web
+                # search surfaces a chip the moment it starts, mid-answer.
+                for event in stream:
+                    if event.type == "content_block_start":
+                        cb = event.content_block
+                        if cb.type == "server_tool_use" and cb.name == "web_search":
+                            yield _sse({"type": "tool", "name": "web_search"})
+                            telemetry.log_event(user.id, "chat", "tool:web_search")
+                    elif event.type == "content_block_delta" and event.delta.type == "text_delta":
+                        yield _sse({"type": "text", "text": event.delta.text})
                 final = stream.get_final_message()
 
             messages.append({"role": "assistant", "content": _clean_blocks(final.content)})
+            # A server-side tool (web search) paused mid-turn: re-send as-is and
+            # Anthropic resumes it — no client tool_result to add.
+            if final.stop_reason == "pause_turn":
+                continue
             if final.stop_reason != "tool_use":
                 break
 

@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Send, Square, LogOut, Check, Trash2, Plus, ListTodo, Mail, Calendar,
-  FolderSearch, Users, Sparkles, RotateCcw,
+  FolderSearch, Users, Sparkles, RotateCcw, Globe,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -32,6 +32,7 @@ const TOOL_LABELS = {
   delete_todo: { icon: ListTodo, label: "Removing a to-do" },
   search_crm_contacts: { icon: Users, label: "Searching CRM contacts" },
   get_crm_contact: { icon: Users, label: "Reading a CRM contact" },
+  web_search: { icon: Globe, label: "Searching the web" },
 };
 
 const SUGGESTIONS = [
