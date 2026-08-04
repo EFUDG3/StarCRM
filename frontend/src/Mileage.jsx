@@ -38,7 +38,7 @@ const fmtRate = (r) => {
 };
 
 export default function MileageTracker() {
-  const [me, setMe] = useState(null);
+  const [me, setMe] = useState(() => api.getCachedMe() ?? null);
   const [places, setPlaces] = useState([]);
   const [visits, setVisits] = useState([]); // day-stamped calendar addresses
   const [newIds, setNewIds] = useState(new Set());
@@ -73,6 +73,7 @@ export default function MileageTracker() {
   const [genBusy, setGenBusy] = useState(false);
 
   useEffect(() => {
+    if (me) return; // reuse the cached app-level probe — no re-check on tab switch
     api.authMe().then(setMe).catch(() => setMe({ signedIn: false, configured: true }));
   }, []);
 

@@ -64,7 +64,7 @@ const loadChat = () => {
 };
 
 export default function StarbotChat() {
-  const [me, setMe] = useState(null); // null = probing
+  const [me, setMe] = useState(() => api.getCachedMe() ?? null); // null = probing
   const [chat, setChat] = useState(loadChat); // { api: [...], ui: [...] }
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -73,8 +73,14 @@ export default function StarbotChat() {
   const [todoText, setTodoText] = useState("");
   const abortRef = useRef(null);
   const scrollRef = useRef(null);
+  // "Pinned" = the view is following the bottom of the conversation. It stays
+  // true until the user scrolls up (to read earlier text mid-stream); scrolling
+  // back to the bottom re-pins. Only a pinned view auto-scrolls, so a streaming
+  // answer no longer yanks the user back down every time new text arrives.
+  const pinnedRef = useRef(true);
 
   useEffect(() => {
+    if (me) return; // reuse the app-level probe (cached) — no extra spinner on tab switch
     api.authMe().then(setMe).catch(() => setMe({ signedIn: false, configured: true }));
   }, []);
 
@@ -85,9 +91,19 @@ export default function StarbotChat() {
     if (me?.signedIn) refreshTodos();
   }, [me?.signedIn]);
 
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
   useEffect(() => {
     try { sessionStorage.setItem(CHAT_KEY, JSON.stringify(chat)); } catch { /* full */ }
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    // Instant (not smooth) jump while pinned — smooth scrolling fights the rapid
+    // streaming updates and feels laggy; instant keeps the bottom glued cleanly.
+    if (pinnedRef.current && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
   }, [chat]);
 
   const send = async (textArg) => {
@@ -96,6 +112,8 @@ export default function StarbotChat() {
     setInput("");
     setError("");
     setBusy(true);
+
+    pinnedRef.current = true; // a fresh turn snaps the view to the bottom
 
     const apiMessages = [...chat.api, { role: "user", content: text }];
     // The streaming assistant turn: text accumulates, tool chips append.
@@ -107,6 +125,24 @@ export default function StarbotChat() {
       setChat({ api: apiMessages, ui });
     };
 
+    // Buffer streamed text and paint it on a cadence instead of on every token.
+    // Anthropic emits many tiny text deltas; rendering each one re-parses the
+    // whole markdown answer per token (janky, and reads as a typewriter). We
+    // accumulate deltas and flush ~10x/sec, so the answer appears in readable
+    // chunks and the markdown is re-rendered a handful of times per second.
+    let pending = "";
+    let flushTimer = null;
+    const flush = () => {
+      flushTimer = null;
+      if (!pending) return;
+      const chunk = pending;
+      pending = "";
+      patchLast((m) => ({ ...m, text: m.text + chunk }));
+    };
+    const scheduleFlush = () => {
+      if (flushTimer == null) flushTimer = setTimeout(flush, 90);
+    };
+
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
@@ -114,14 +150,18 @@ export default function StarbotChat() {
         apiMessages,
         (evt) => {
           if (evt.type === "text") {
-            patchLast((m) => ({ ...m, text: m.text + evt.text }));
+            pending += evt.text;
+            scheduleFlush();
           } else if (evt.type === "tool") {
+            flush(); // keep the tool chip ordered after the text before it
             patchLast((m) => ({ ...m, tools: [...m.tools, evt.name] }));
           } else if (evt.type === "todos_changed") {
             refreshTodos();
           } else if (evt.type === "done") {
+            flush();
             setChat({ api: evt.messages, ui });
           } else if (evt.type === "error") {
+            flush();
             setError(evt.message);
           }
         },
@@ -136,6 +176,8 @@ export default function StarbotChat() {
         );
       }
     } finally {
+      if (flushTimer != null) clearTimeout(flushTimer);
+      flush(); // paint any tail left after done/abort/error
       abortRef.current = null;
       setBusy(false);
     }
@@ -230,7 +272,7 @@ export default function StarbotChat() {
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_20rem] xl:grid-cols-[1fr_24rem] items-start">
       {/* Chat column */}
-      <section className="bg-white rounded-lg border-l-4 flex flex-col" style={{ borderColor: SEA, height: "calc(100vh - 14rem)", minHeight: "28rem" }}>
+      <section className="bg-white rounded-lg border-l-4 flex flex-col min-w-0" style={{ borderColor: SEA, height: "calc(100vh - 14rem)", minHeight: "28rem" }}>
         <div className="flex items-center justify-between px-4 py-2.5 border-b" style={{ borderColor: "#eee9e2" }}>
           <div className="font-mono text-xs uppercase tracking-widest" style={{ color: SEA }}>
             ★ Starbot · {me.name}
@@ -245,7 +287,7 @@ export default function StarbotChat() {
           </div>
         </div>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {chat.ui.length === 0 && (
             <div className="pt-8 text-center">
               <div className="text-sm mb-4" style={{ color: "#8b9a9f" }}>

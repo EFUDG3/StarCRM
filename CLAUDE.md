@@ -24,7 +24,50 @@ This file is the single source of truth for picking the project back up. Read it
 > (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
 > + Rate columns; own calendar only.
 
-> **Resume note (2026-07-23, LATEST) — starbot chat can search the web.**
+> **Resume note (2026-07-30, LATEST) — chat UX fixes + Board→CRM + live webcam card scan shipped; Tasks aggregator DESIGNED.**
+> - **Chat UX (LIVE, rev `starbot--0000030` / image `ui-chunked`):** streaming paints in
+>   ~90ms chunks not per-token (buffer in `Chat.jsx` `send()`); mid-stream scroll no longer
+>   yanks to bottom (`pinnedRef` only autoscrolls within 80px of bottom); fenced code blocks
+>   (email drafts) now WRAP (`.starbot-md pre` → `white-space:pre-wrap;overflow-wrap:anywhere`
+>   + `min-w-0` on the chat column); "Checking sign-in…" flash on every tab switch is gone —
+>   `api.authMe()` is cached (`getCachedMe`) and App/Chat/Tasks/Mileage init `me` from it.
+>   (The 30s cold-start itself is still Azure scale-to-zero; keep-warm ping is parked.)
+> - **Board → CRM + webcam card scan (LIVE, rev `starbot--0000031` / image `card-camera`):**
+>   tab reads "CRM" now (Salam dislikes "board"; eyebrow "Relationship board" →
+>   "Relationships", loading → "Loading contacts…"; internal `view==="board"` + hash
+>   unchanged; the **"Task board"** eyebrow left until the Tasks redesign ships). Card scan is
+>   now a live **webcam** capture — `CardCamera` in `App.jsx`, `getUserMedia({video:{facingMode:
+>   "environment"…}})` (rear cam on phones, default on desktop, NO picker — Ethan), framing
+>   guide → Capture → freeze → Use/Retake → canvas `toBlob` JPEG → SAME `/api/contacts/scan-card`
+>   (blob appended with a filename; `api.scanCard` tweak). Nothing written to disk (DB already
+>   stored no card image). File picker kept as an auto-fallback when the cam is missing/blocked.
+>   No backend change.
+> - **Tasks tab = DESIGNED, not built.** Reframe: stop being a manual PM checklist; make it a
+>   read-only **aggregator**. Keep the name "Tasks". Lanes: **Meetings** (calendar read),
+>   **Replies needed** = Outlook FLAGGED mail (read-only; each row an "Open in Outlook" link,
+>   NO checkbox — can't clear the flag; it's the seam for the future **autodraft** feature,
+>   which needs `Mail.ReadWrite`), **People** = CRM `next_action`/`next_due` (check = complete
+>   the CRM action), manual **rail** = existing `todos` table (bot's `add_todo` still lands
+>   here). Decisions (Ethan): read-only, **NO push-to-Outlook, NO new Graph scopes**; a
+>   **Refresh** button for "flagged while open"; **priority dropped** → time-based urgency
+>   (overdue/today/week) + one optional star; passed meetings **collapse to "Earlier today"**
+>   not deleted; checked items → a **"Done today"** tray that clears overnight. Clickable mock:
+>   `scratchpad/starbot-tasks-mock.html` (artifact b744a642). **Next session:** build the
+>   aggregation (flagged-mail + calendar via existing `Mail.Read`/`Calendars.Read`, follow-ups
+>   from our DB) + rewrite `Tasks.jsx`.
+> - **Demo analytics (Tue 2026-07-28, 9–11am PT):** Entra sign-ins = **7 distinct users**
+>   (kim, ethan, salam, rj, leighann, rudy, amanda); Container App **636 requests** (peak 403
+>   in the 9:30–10:00 bucket), **replicas stayed at 1**; Claude console ~1.5–2M tokens/day,
+>   near the $1/day cap. Pull cmd: `az monitor metrics list --resource <id> --namespace
+>   "microsoft.app/containerapps" --metric Requests …` (flag is `--namespace`, NOT
+>   `--metric-namespace`). Sign-ins via `az rest` → Graph `auditLogs/signIns` filtered by
+>   `appId 066b737b-…` + window. The `events` telemetry table is queryable by `created_at`
+>   (naive UTC) for ANY window; `/api/stats` only does days-back aggregate + is auth-gated.
+> - **Parked:** UI refresh (wider layout + serif labels) previewed, NOT shipped
+>   (`scratchpad/starbot-ui-refresh.html`); keep-warm ping; DB move Neon→Azure (Ethan drives
+>   it himself with Claude's step-by-step direction, does his own git).
+
+> **Resume note (2026-07-23) — starbot chat can search the web.**
 > - Added Anthropic's **server-side web search** to the chat agent loop
 >   (`backend/chat.py`) for current/general/referential questions the user's M365
 >   data can't answer. Tool: `WEB_SEARCH_TOOL = {type: web_search_20250305, name:

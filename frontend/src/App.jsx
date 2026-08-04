@@ -64,7 +64,7 @@ export default function StarCRM() {
   // Company gate: the whole app requires a Microsoft sign-in (me.signedIn).
   // null = still checking. When M365 login isn't configured (local dev without
   // the client secret), the gate is skipped and the legacy profile model runs.
-  const [me, setMe] = useState(null);
+  const [me, setMe] = useState(() => api.getCachedMe() ?? null);
   const [contacts, setContacts] = useState(null); // null = loading
   const [users, setUsers] = useState([]);
   const [userId, setUserId] = useState(null);
@@ -76,6 +76,7 @@ export default function StarCRM() {
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
+  const [cameraOpen, setCameraOpen] = useState(false);
   // Up-next rail collapse state, remembered across visits.
   const [upNextOpen, setUpNextOpen] = useState(() => localStorage.getItem("upNextOpen") !== "0");
   useEffect(() => { localStorage.setItem("upNextOpen", upNextOpen ? "1" : "0"); }, [upNextOpen]);
@@ -89,6 +90,7 @@ export default function StarCRM() {
 
   // Session probe runs first — everything else waits for it.
   useEffect(() => {
+    if (me) return; // cached from a prior probe this session
     api.authMe().then(setMe).catch(() => setMe({ signedIn: false, configured: true }));
   }, []);
 
@@ -261,9 +263,8 @@ export default function StarCRM() {
   };
 
   // Scan a business card → extract fields → open the form prefilled for review.
-  const handleScanFile = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-picking the same file
+  // Shared by the webcam capture (a Blob) and the file-picker fallback (a File).
+  const runScan = async (file) => {
     if (!file) return;
     setScanError("");
     setScanning(true);
@@ -295,6 +296,19 @@ export default function StarCRM() {
     } finally {
       setScanning(false);
     }
+  };
+
+  // File-picker fallback (webcam unavailable or permission blocked).
+  const handleScanFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    runScan(file);
+  };
+
+  // Webcam capture → same scan pipeline as a picked file.
+  const handleCameraCapture = async (blob) => {
+    setCameraOpen(false);
+    await runScan(blob);
   };
 
   const switchView = (v) => {
@@ -352,7 +366,7 @@ export default function StarCRM() {
   if (!contacts && view === "board") {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: MIST }}>
-        <div className="font-mono text-sm tracking-widest uppercase" style={{ color: SEA }}>Loading the board…</div>
+        <div className="font-mono text-sm tracking-widest uppercase" style={{ color: SEA }}>Loading contacts…</div>
       </div>
     );
   }
@@ -370,7 +384,7 @@ export default function StarCRM() {
                 view — the titles vary in length and used to shift the row. */}
             <div className="sm:w-60 shrink-0">
               <div className="font-mono text-xs tracking-[0.25em] uppercase mb-1 whitespace-nowrap" style={{ color: SEA }}>
-                {view === "chat" ? "AI assistant" : view === "tasks" ? "Task board" : view === "mileage" ? "Mileage tracker" : "Relationship board"}
+                {view === "chat" ? "AI assistant" : view === "tasks" ? "Task board" : view === "mileage" ? "Mileage tracker" : "Relationships"}
               </div>
               <h1 className="text-3xl font-bold tracking-tight whitespace-nowrap" style={{ fontFamily: "Georgia, serif" }}>
                 <span style={{ color: SEA }}>★</span> {view === "chat" ? "Starbot" : view === "tasks" ? "Star Tasks" : view === "mileage" ? "Star Mileage" : "Star CRM"}
@@ -406,7 +420,7 @@ export default function StarCRM() {
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
                 style={view === "board" ? { background: INK, color: "white" } : { background: "white", color: INK }}
               >
-                <LayoutGrid size={14} /> Board
+                <LayoutGrid size={14} /> CRM
               </button>
             </div>
             {view === "board" && (
@@ -432,14 +446,13 @@ export default function StarCRM() {
               ref={cardInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
               onChange={handleScanFile}
               className="hidden"
             />
             <button
-              onClick={() => cardInputRef.current?.click()}
+              onClick={() => { setScanError(""); setCameraOpen(true); }}
               disabled={scanning}
-              title="Scan a business card"
+              title="Scan a business card with the camera"
               className="flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium"
               style={{ background: "white", color: INK, border: "1px solid #cdd6d4", opacity: scanning ? 0.6 : 1 }}
             >
@@ -464,6 +477,15 @@ export default function StarCRM() {
 
         {/* Mileage tab */}
         {view === "mileage" && <MileageTracker />}
+
+        {/* Webcam card capture (opens from the Scan card button) */}
+        {cameraOpen && (
+          <CardCamera
+            onCapture={handleCameraCapture}
+            onClose={() => setCameraOpen(false)}
+            onUseFile={() => { setCameraOpen(false); cardInputRef.current?.click(); }}
+          />
+        )}
 
         {view === "board" && <>
         {/* Scan error banner */}
@@ -762,6 +784,158 @@ function UserSwitcher({ users, userId, onSwitch, onAdd, onRename, onDelete }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// Live webcam capture for business cards. Prefers the rear camera on phones
+// (facingMode "environment"); on desktop the browser just uses the default cam.
+// The captured frame is a JPEG Blob handed to the same scan endpoint as a picked
+// file — nothing is written to disk. If the camera is missing or blocked, the
+// user is routed to the file-picker fallback instead.
+function CardCamera({ onCapture, onClose, onUseFile }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const shotRef = useRef(null);          // the captured Blob
+  const [preview, setPreview] = useState(""); // object URL of the frozen frame
+  const [ready, setReady] = useState(false);  // stream is live, capture allowed
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setErr("This browser can't open the camera here. Upload a file instead.");
+      return;
+    }
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false,
+        });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        const v = videoRef.current;
+        if (v) {
+          v.srcObject = stream;
+          v.onloadedmetadata = () => { if (!cancelled) setReady(true); };
+          v.play().then(() => { if (!cancelled) setReady(true); }).catch(() => {});
+        }
+      } catch (e) {
+        setErr(
+          e?.name === "NotAllowedError"
+            ? "Camera access is blocked. Allow it in the browser address bar, or upload a file instead."
+            : e?.name === "NotFoundError"
+              ? "No camera found on this device. Upload a file instead."
+              : "Couldn't start the camera. Upload a file instead."
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  // Release the frozen-frame object URL when it changes or on unmount.
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+
+  const stopStream = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+  };
+
+  const snap = () => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = v.videoWidth;
+    canvas.height = v.videoHeight;
+    canvas.getContext("2d").drawImage(v, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      shotRef.current = blob;
+      setPreview(URL.createObjectURL(blob));
+    }, "image/jpeg", 0.9);
+  };
+
+  const retake = () => { shotRef.current = null; setPreview(""); };
+  const useShot = () => { stopStream(); onCapture(shotRef.current); };
+  const cancel = () => { stopStream(); onClose(); };
+  const useFile = () => { stopStream(); onUseFile(); };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.6)" }}
+      onClick={cancel}
+    >
+      <div className="bg-white rounded-lg p-4 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest" style={{ color: SEA }}>
+            <Camera size={14} /> Scan a card
+          </div>
+          <button onClick={cancel} className="p-1.5 rounded hover:bg-stone-100" title="Close"><X size={16} /></button>
+        </div>
+
+        {err ? (
+          <div className="text-sm p-4 rounded" style={{ background: "#FBEAE8", color: TIDE, border: `1px solid ${TIDE}` }}>
+            {err}
+          </div>
+        ) : (
+          <div className="relative rounded overflow-hidden" style={{ background: "#000", aspectRatio: "4 / 3" }}>
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              autoPlay
+              className="w-full h-full object-cover"
+              style={{ display: preview ? "none" : "block" }}
+            />
+            {preview && (
+              <img src={preview} alt="Captured card" className="w-full h-full object-contain" style={{ background: "#000" }} />
+            )}
+            {!preview && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <div style={{ width: "82%", aspectRatio: "1.75 / 1", border: "2px dashed rgba(255,255,255,0.9)", borderRadius: 8 }} />
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 mt-3">
+          {err ? (
+            <>
+              <button onClick={useFile} className="px-4 py-2 rounded text-white text-sm font-medium" style={{ background: INK }}>Upload a file</button>
+              <button onClick={cancel} className="px-4 py-2 rounded text-sm" style={{ background: MIST }}>Cancel</button>
+            </>
+          ) : preview ? (
+            <>
+              <button onClick={useShot} className="flex items-center gap-1.5 px-4 py-2 rounded text-white text-sm font-medium" style={{ background: SEA }}>
+                <Check size={16} /> Use this photo
+              </button>
+              <button onClick={retake} className="flex items-center gap-1.5 px-4 py-2 rounded text-sm" style={{ background: MIST }}>
+                <RotateCcw size={14} /> Retake
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={snap} disabled={!ready} className="flex items-center gap-1.5 px-4 py-2 rounded text-white text-sm font-medium disabled:opacity-50" style={{ background: SEA }}>
+                <Camera size={16} /> {ready ? "Capture" : "Starting camera…"}
+              </button>
+              <button onClick={useFile} className="px-4 py-2 rounded text-sm" style={{ background: MIST }}>Upload a file instead</button>
+            </>
+          )}
+        </div>
+
+        {!err && !preview && (
+          <div className="text-xs mt-2" style={{ color: "#8b9a9f" }}>
+            Hold the card inside the frame, filling as much of it as you can, then Capture.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -28,11 +28,21 @@ html {
   background: #ffffff; border: 1px solid #e5e0d8; border-radius: 3px;
   padding: 0.05rem 0.3rem; font-size: 0.8em;
 }
+/* Fenced code blocks (drafted emails land here) must WRAP, not run off the
+   right edge. Default `white-space: pre` overflowed a long line horizontally
+   and, because a grid/flex child sizes to its widest content, blew the whole
+   chat column past the layout ("pushed back the screen" until a reflow). pre-wrap
+   keeps intended line breaks while wrapping long lines; overflow-wrap breaks
+   the rare unbreakable token (a long URL). overflow-x stays as a last resort. */
 .starbot-md pre {
   background: #ffffff; border: 1px solid #e5e0d8; border-radius: 6px;
   padding: 0.6rem 0.75rem; margin: 0.5rem 0; overflow-x: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.starbot-md pre code { background: none; border: none; padding: 0; }
+.starbot-md pre code {
+  background: none; border: none; padding: 0;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
 .starbot-md blockquote {
   border-left: 3px solid #C8B89A; padding-left: 0.75rem; margin: 0.5rem 0;
   color: #4a5a60;

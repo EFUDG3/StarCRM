@@ -61,7 +61,8 @@ export const resetData = () => request("/api/reset", { method: "POST" });
 // cardImage } where cardImage is a compact JPEG data URL to save with the contact.
 export const scanCard = async (file, timeoutMs = 30000) => {
   const fd = new FormData();
-  fd.append("file", file);
+  // Accepts a picked File or a Blob captured from the webcam canvas (no .name).
+  fd.append("file", file, file.name || "card.jpg");
   const uid = getCurrentUser();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -113,7 +114,22 @@ const sessionRequest = async (path, options = {}) => {
   return res.json();
 };
 
-export const authMe = () => sessionRequest("/api/auth/me");
+// The session probe is the same for every tab, so cache it: dedupe the calls
+// App/Chat/Tasks/Mileage each fire on mount (one request instead of four) and
+// let a tab switch reuse the resolved value with no "Checking sign-in…" flash.
+// A full page reload (sign-out) resets this module, so the cache never goes
+// stale within a session. A failed probe clears the cache so it can retry.
+let _mePromise = null;
+let _meValue;
+export const getCachedMe = () => _meValue;
+export const authMe = () => {
+  if (!_mePromise) {
+    _mePromise = sessionRequest("/api/auth/me")
+      .then((v) => { _meValue = v; return v; })
+      .catch((e) => { _mePromise = null; throw e; });
+  }
+  return _mePromise;
+};
 export const authLogout = () => sessionRequest("/api/auth/logout", { method: "POST" });
 // Sign-in is a full-page redirect (Microsoft login), not an XHR.
 export const authLoginUrl = () => `${BASE}/api/auth/login`;

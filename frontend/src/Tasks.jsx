@@ -30,12 +30,13 @@ const PRIORITY_STYLE = {
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function TaskBoard() {
-  const [me, setMe] = useState(null);
+  const [me, setMe] = useState(() => api.getCachedMe() ?? null);
   const [todos, setTodos] = useState(null); // null = loading
   const [newText, setNewText] = useState("");
   const [dragId, setDragId] = useState(null);
 
   useEffect(() => {
+    if (me) return; // reuse the cached app-level probe — no re-check on tab switch
     api.authMe().then(setMe).catch(() => setMe({ signedIn: false, configured: true }));
   }, []);
 
