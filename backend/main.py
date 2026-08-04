@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.orm import Session
 
+import accounts
 import auth
 import cards
 import chat
@@ -241,6 +242,9 @@ def _seed_on_first_run() -> None:
             db.commit()
             db.refresh(bob)
             load_seed(db, bob)
+        # Shared accounts seed their own 5 pilot rows (independent of users —
+        # self-guards on an empty accounts table, so it runs once).
+        accounts.seed_accounts(db)
     finally:
         db.close()
 
@@ -267,6 +271,7 @@ def usage_stats(
 # identity. The CRM board's existing routes are unchanged.
 app.include_router(m365.router)
 app.include_router(mileage.router)
+app.include_router(accounts.router)
 
 
 @app.post("/api/chat")

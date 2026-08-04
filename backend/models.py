@@ -41,6 +41,18 @@ def _visit_id() -> str:
     return "v" + uuid.uuid4().hex[:12]
 
 
+def _account_id() -> str:
+    return "a" + uuid.uuid4().hex[:12]
+
+
+def _acct_contact_id() -> str:
+    return "ac" + uuid.uuid4().hex[:11]
+
+
+def _acct_interaction_id() -> str:
+    return "ai" + uuid.uuid4().hex[:11]
+
+
 class User(Base):
     """A profile that owns its own set of contacts. No password — selecting a
     user is a client-side switch for now. When SSO lands, this table gains the
@@ -228,3 +240,85 @@ class Trip(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     owner = relationship("User", back_populates="trips")
+
+
+class Account(Base):
+    """A shared, company-wide sales account — the 'hit list'. Unlike Contacts
+    (private per profile, scoped by user_id), Accounts are a TEAM asset: every
+    signed-in Star user sees and edits every account. `rep` marks who owns the
+    relationship, not who can see it; a blank rep means unassigned (up for
+    grabs). `updated_at`/`updated_by` make a cold account easy to spot and
+    show who last touched it. Addresses and emails are JSON string lists so one
+    account can carry several of each; customer people live in account_contacts.
+    """
+
+    __tablename__ = "accounts"
+
+    id = Column(String, primary_key=True, default=_account_id)
+    name = Column(String, nullable=False)          # company / property name
+    rep = Column(String, default="")               # assigned Star salesperson; "" = unassigned
+    status = Column(String, nullable=False, default="prospect")  # prospect|contacted|active|sold|dead|cod
+    website = Column(String, default="")
+    phone = Column(String, default="")
+    addresses_json = Column(Text, default="[]")    # JSON list of address strings
+    emails_json = Column(Text, default="[]")       # JSON list of account-level emails
+    num_properties = Column(Integer, nullable=True)
+    total_units = Column(Integer, nullable=True)   # ranking key (opportunity size)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now())
+    updated_by = Column(String, default="")        # name of the last editor
+
+    contacts = relationship(
+        "AccountContact",
+        back_populates="account",
+        cascade="all, delete-orphan",
+    )
+    interactions = relationship(
+        "AccountInteraction",
+        back_populates="account",
+        cascade="all, delete-orphan",
+    )
+
+
+class AccountContact(Base):
+    """A customer-side person under a shared Account (name, role, email, phone,
+    address). Many per account, which covers the 'multiple customers / multiple
+    emails' case. Created inline on the account form, or by attaching one of a
+    user's personal CRM contacts (the fields are copied in, so it becomes
+    team-visible on the shared account)."""
+
+    __tablename__ = "account_contacts"
+
+    id = Column(String, primary_key=True, default=_acct_contact_id)
+    account_id = Column(
+        String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name = Column(String, nullable=False)
+    role = Column(String, default="")
+    email = Column(String, default="")
+    phone = Column(String, default="")
+    address = Column(String, default="")
+    created_at = Column(DateTime, server_default=func.now())
+
+    account = relationship("Account", back_populates="contacts")
+
+
+class AccountInteraction(Base):
+    """A dated activity-log entry on a shared Account — the "log note" history
+    (a visit, call, email, or step). Mirrors Contact.Interaction but records
+    WHO logged it (`by`), since accounts are edited by the whole team.
+    Cascade-deleted with the account."""
+
+    __tablename__ = "account_interactions"
+
+    id = Column(String, primary_key=True, default=_acct_interaction_id)
+    account_id = Column(
+        String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    date = Column(String, nullable=False)  # ISO date string
+    note = Column(Text, nullable=False)
+    by = Column(String, default="")        # name of the user who logged it
+    created_at = Column(DateTime, server_default=func.now())
+
+    account = relationship("Account", back_populates="interactions")

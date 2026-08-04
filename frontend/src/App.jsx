@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Search, Phone, Mail, X, Check, Clock, Pencil, Trash2, ChevronLeft, RotateCcw,
-  UserCircle, ChevronDown, UserPlus, Camera, Sparkles, LayoutGrid, ListTodo, Car,
+  UserCircle, ChevronDown, UserPlus, Camera, Sparkles, LayoutGrid, ListTodo, Car, Building2,
 } from "lucide-react";
 import * as api from "./api.js";
 import StarbotChat from "./Chat.jsx";
 import TaskBoard from "./Tasks.jsx";
 import MileageTracker from "./Mileage.jsx";
+import AccountsBoard from "./Accounts.jsx";
 
 // ---------- Brand tokens ----------
 // Star brand: red #922525, black, white, with warm supporting neutrals.
@@ -25,6 +26,7 @@ const CATEGORIES = {
   sub: { label: "Subcontractor", color: "#4A5A6A" },  // blue-gray
   designer: { label: "Designer", color: "#7A5C8E" },  // muted purple
   insurance: { label: "Insurance", color: "#B7791F" },// amber
+  healthcare: { label: "Healthcare", color: "#2C7A7B" }, // teal
   other: { label: "Other", color: "#6B7280" },        // neutral gray
 };
 
@@ -59,6 +61,7 @@ export default function StarCRM() {
     window.location.hash === "#starbot" ? "chat"
       : window.location.hash === "#tasks" ? "tasks"
       : window.location.hash === "#mileage" ? "mileage"
+      : window.location.hash === "#accounts" ? "accounts"
       : "board"
   );
   // Company gate: the whole app requires a Microsoft sign-in (me.signedIn).
@@ -70,6 +73,7 @@ export default function StarCRM() {
   const [userId, setUserId] = useState(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("due"); // due | created | name
   const [selectedId, setSelectedId] = useState(null);
   const [editing, setEditing] = useState(null); // contact object being edited, or "new"
   const [touchText, setTouchText] = useState("");
@@ -219,11 +223,18 @@ export default function StarCRM() {
       .filter((c) => (filter === "all" ? true : c.category === filter))
       .filter((c) => !q || [c.name, c.company, c.role, c.notes].join(" ").toLowerCase().includes(q))
       .sort((a, b) => {
+        if (sortBy === "created") {
+          // Newest first by creation date; ties fall back to name.
+          const ca = a.created || "", cb = b.created || "";
+          if (ca !== cb) return ca < cb ? 1 : -1;
+          return a.name.localeCompare(b.name);
+        }
+        if (sortBy === "name") return a.name.localeCompare(b.name);
         const da = a.nextDue || "9999", db = b.nextDue || "9999";
         if (da !== db) return da < db ? -1 : 1;
         return a.name.localeCompare(b.name);
       });
-  }, [contacts, query, filter]);
+  }, [contacts, query, filter, sortBy]);
 
   const dueSoon = useMemo(() => {
     if (!contacts) return [];
@@ -315,7 +326,7 @@ export default function StarCRM() {
     setView(v);
     // Keep the hash in sync (deep link + where the sign-in redirect lands)
     // without pushing history entries that would fight the Back-button logic.
-    const hash = v === "chat" ? "#starbot" : v === "tasks" ? "#tasks" : v === "mileage" ? "#mileage" : window.location.pathname;
+    const hash = v === "chat" ? "#starbot" : v === "tasks" ? "#tasks" : v === "mileage" ? "#mileage" : v === "accounts" ? "#accounts" : window.location.pathname;
     window.history.replaceState(null, "", hash);
   };
 
@@ -384,10 +395,10 @@ export default function StarCRM() {
                 view — the titles vary in length and used to shift the row. */}
             <div className="sm:w-60 shrink-0">
               <div className="font-mono text-xs tracking-[0.25em] uppercase mb-1 whitespace-nowrap" style={{ color: SEA }}>
-                {view === "chat" ? "AI assistant" : view === "tasks" ? "Task board" : view === "mileage" ? "Mileage tracker" : "Relationships"}
+                {view === "chat" ? "AI assistant" : view === "tasks" ? "Task board" : view === "mileage" ? "Mileage tracker" : view === "accounts" ? "Shared hit list" : "Relationships"}
               </div>
               <h1 className="text-3xl font-bold tracking-tight whitespace-nowrap" style={{ fontFamily: "Georgia, serif" }}>
-                <span style={{ color: SEA }}>★</span> {view === "chat" ? "Starbot" : view === "tasks" ? "Star Tasks" : view === "mileage" ? "Star Mileage" : "Star CRM"}
+                <span style={{ color: SEA }}>★</span> {view === "chat" ? "Starbot" : view === "tasks" ? "Star Tasks" : view === "mileage" ? "Star Mileage" : view === "accounts" ? "Star Accounts" : "Star CRM"}
               </h1>
             </div>
             {/* Segmented control: buttons sit inset (p-0.5 + own rounding) so the
@@ -421,6 +432,13 @@ export default function StarCRM() {
                 style={view === "board" ? { background: INK, color: "white" } : { background: "white", color: INK }}
               >
                 <LayoutGrid size={14} /> CRM
+              </button>
+              <button
+                onClick={() => switchView("accounts")}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
+                style={view === "accounts" ? { background: INK, color: "white" } : { background: "white", color: INK }}
+              >
+                <Building2 size={14} /> Accounts
               </button>
             </div>
             {view === "board" && (
@@ -477,6 +495,9 @@ export default function StarCRM() {
 
         {/* Mileage tab */}
         {view === "mileage" && <MileageTracker />}
+
+        {/* Accounts tab (shared hit list) */}
+        {view === "accounts" && <AccountsBoard />}
 
         {/* Webcam card capture (opens from the Scan card button) */}
         {cameraOpen && (
@@ -575,7 +596,7 @@ export default function StarCRM() {
             {selected.notes && <p className="mt-4 text-sm leading-relaxed whitespace-pre-wrap">{selected.notes}</p>}
 
             <div className="mt-5">
-              <div className="font-mono text-xs uppercase tracking-widest mb-2" style={{ color: INK }}>Log a touch</div>
+              <div className="font-mono text-xs uppercase tracking-widest mb-2" style={{ color: INK }}>Log note</div>
               <div className="flex gap-2">
                 <input
                   value={touchText}
@@ -594,7 +615,7 @@ export default function StarCRM() {
                     <span>{l.note}</span>
                   </li>
                 ))}
-                {selected.log.length === 0 && <li className="text-sm" style={{ color: "#8b9a9f" }}>No touches logged yet. Add the first one above.</li>}
+                {selected.log.length === 0 && <li className="text-sm" style={{ color: "#8b9a9f" }}>No notes yet. Add the first one above.</li>}
               </ul>
             </div>
           </section>
@@ -614,6 +635,17 @@ export default function StarCRM() {
                   style={{ borderColor: "#cdd6d4" }}
                 />
               </div>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="bg-white border rounded px-2 py-2 font-mono text-xs uppercase tracking-wider shrink-0"
+                style={{ borderColor: "#cdd6d4", color: INK }}
+                title="Sort contacts"
+              >
+                <option value="due">Sort: Due date</option>
+                <option value="created">Sort: Newest added</option>
+                <option value="name">Sort: Name</option>
+              </select>
               {["all", ...Object.keys(CATEGORIES)].map((k) => (
                 <button
                   key={k}

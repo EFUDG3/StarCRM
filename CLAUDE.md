@@ -24,7 +24,52 @@ This file is the single source of truth for picking the project back up. Read it
 > (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
 > + Rate columns; own calendar only.
 
-> **Resume note (2026-07-30, LATEST) — chat UX fixes + Board→CRM + live webcam card scan shipped; Tasks aggregator DESIGNED.**
+> **Resume note (2026-08-04, LATEST) — shared Accounts tab (the "hit list") shipped as a pilot.**
+> - **What it is:** a 5th tab, **Accounts** (`#accounts`, `frontend/src/Accounts.jsx` +
+>   `backend/accounts.py`), a COMPANY-WIDE shared sales prospecting list — every signed-in user
+>   sees + edits every account (session-cookie auth, NOT user-scoped). Distinct from the personal
+>   CRM board.
+> - **Model (3 new tables):** `accounts` (name, `rep` free-text, `status`
+>   prospect|contacted|active|sold|dead|cod, website, phone, `addresses_json`/`emails_json` = JSON
+>   string lists so one account holds several, num_properties, total_units, notes, `updated_at`/
+>   `updated_by`) → many `account_contacts` (name/role/email/phone/address) → many
+>   `account_interactions` (dated "log note" history, records `by`). create_all makes them;
+>   `seed_accounts()` seeds 5 real Hit List II mgmt-co rows on first run (CONAM 10,744 units …
+>   Whittington 866).
+> - **API (`backend/accounts.py`):** list/create/get/update/delete + `POST /{id}/log` (append a
+>   dated note, stamps updated_by). serialize() parses JSON lists → arrays, snake→camel, nests
+>   contacts + `log`. Update REPLACES contacts wholesale (form owns the list; delete-orphan
+>   cascade cleans up). Registered in main.py; seed called from `_seed_on_first_run`.
+> - **Validation caps (both layers):** Pydantic `Field(max_length=…)` (name 200, phone 40,
+>   website 300, email 254 [RFC], notes 5000) + list caps (addresses/emails 25, contacts 100) +
+>   `status` coerced to the known set; frontend `maxLength` mirrors. Numbers ge 0. Guards the
+>   SHARED table against one person's giant paste. NOTE: all data uses the SQLAlchemy ORM
+>   (parameterized) — no SQL-injection surface; only raw SQL anywhere is static DDL in
+>   `_ensure_schema`.
+> - **UI (Accounts.jsx):** table RANKED BY UNITS with clickable sort headers (units/name/updated),
+>   saved-view chips **All / My accounts** (rep matches signed-in first name; splits on /,& so
+>   "Salam / Leighann" shows for both) **/ Unassigned** (no rep), search. Row click → read-first
+>   **DETAIL** view (not the editor) with the **Activity** log + a **Log note** box and quick
+>   actions (Log note, + Add email, + Add contact, Edit notes); **Edit** button → full form. Rep =
+>   free-text input + `<datalist>` of user names (type-and-autofill like mileage; allows
+>   custom/multi-rep). **Attach a personal contact** copies a private CRM contact onto the shared
+>   account (team-visible). Browser **Back** closes an open account → list (same as the board's
+>   overlay handling; in-page back matches). Long names wrap (18rem cap).
+> - **Personal CRM also got:** a **healthcare** category (teal); a **Sort** dropdown (Due date /
+>   Newest added [created_at] / Name); **"Log a touch" renamed → "Log note"** everywhere;
+>   **"Board" tab renamed → "CRM"** (Salam dislikes "board"; shipped rev 31).
+> - **Deployed:** revs **32→35** (images accounts-pilot / accounts-hardening / accounts-detail /
+>   accounts-nav); live = `starbot--0000035`.
+> - **Bugs fixed en route:** repeatable email rows were re-filled by the BROWSER, not React —
+>   `autoComplete="off"` on the account-form inputs. A list input was a component-defined-in-render
+>   (`key` prop swallowed + input focus lost each keystroke) → converted to a render function.
+> - **Accounts NEXT / open:** import the real data AFTER cleanup — flooring hit list (~1000 rows)
+>   is dated + messy (dupes, ALL-CAPS legacy accounting rows, misplaced fields); Ethan: base off
+>   **Hit List II (mgmt companies)** only for now. Flooring/Windows department split DEFERRED.
+>   Source of the mgmt-co list TBD (Ethan checking). CSVs in `Downloads/`: `Star Hit List
+>   II(Management Companies).csv`, `Star Hit List(flooring department).csv`.
+
+> **Resume note (2026-07-30) — chat UX fixes + Board→CRM + live webcam card scan shipped; Tasks aggregator DESIGNED.**
 > - **Chat UX (LIVE, rev `starbot--0000030` / image `ui-chunked`):** streaming paints in
 >   ~90ms chunks not per-token (buffer in `Chat.jsx` `send()`); mid-stream scroll no longer
 >   yanks to bottom (`pinnedRef` only autoscrolls within 80px of bottom); fenced code blocks

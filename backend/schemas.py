@@ -8,7 +8,7 @@ frontend receives is identical to Bob's original data structure (including the
 """
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class ContactIn(BaseModel):
@@ -93,3 +93,56 @@ class ReportGenIn(BaseModel):
     start: str
     end: str
     dates: list = []
+
+
+_STATUSES = {"prospect", "contacted", "active", "sold", "dead", "cod"}
+
+
+class AccountContactIn(BaseModel):
+    """One customer person on an account. Field caps are enforced here so a
+    malformed or oversized payload is rejected (422) before it reaches the DB."""
+    name: str = Field(default="", max_length=200)
+    role: str = Field(default="", max_length=120)
+    email: str = Field(default="", max_length=254)   # RFC 5321 max
+    phone: str = Field(default="", max_length=40)
+    address: str = Field(default="", max_length=300)
+
+
+class AccountIn(BaseModel):
+    """A shared 'hit list' account. `addresses`/`emails` are string lists (an
+    account can hold several); `contacts` is the full customer list (the form
+    owns it, so the server replaces the account's contacts on each save).
+
+    Length + count caps live here: oversized text is rejected with a 422 before
+    it can bloat the shared table, and `status` is coerced to a known value."""
+    name: str = Field(max_length=200)
+    rep: str = Field(default="", max_length=120)
+    status: str = "prospect"
+    website: str = Field(default="", max_length=300)
+    phone: str = Field(default="", max_length=40)
+    addresses: list[str] = Field(default_factory=list)
+    emails: list[str] = Field(default_factory=list)
+    numProperties: Optional[int] = Field(default=None, ge=0)
+    totalUnits: Optional[int] = Field(default=None, ge=0)
+    notes: str = Field(default="", max_length=5000)
+    contacts: list[AccountContactIn] = Field(default_factory=list, max_length=100)
+
+    @field_validator("status")
+    @classmethod
+    def _valid_status(cls, v: str) -> str:
+        v = (v or "prospect").strip().lower()
+        return v if v in _STATUSES else "prospect"
+
+    @field_validator("addresses", "emails")
+    @classmethod
+    def _cap_items(cls, v: list) -> list:
+        # Trim each entry to 300 chars and cap the list at 25 (forgiving —
+        # truncates rather than 422s, since these come from a repeatable field).
+        return [str(x).strip()[:300] for x in (v or [])][:25]
+
+
+class AccountLogIn(BaseModel):
+    """One dated activity-log note on an account. `date` defaults to today on
+    the server if omitted."""
+    note: str = Field(max_length=2000)
+    date: Optional[str] = None

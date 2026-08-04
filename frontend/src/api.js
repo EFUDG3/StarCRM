@@ -174,6 +174,17 @@ export const reportDownload = async (start, end, dates) => {
   return { blob: await res.blob(), filename: m ? m[1] : "Mileage Report.xlsx" };
 };
 
+// --- Accounts (shared 'hit list' — company-wide, session-cookie auth) --------
+export const listAccounts = () => sessionRequest("/api/accounts");
+export const createAccount = (data) =>
+  sessionRequest("/api/accounts", { method: "POST", body: JSON.stringify(data) });
+export const updateAccount = (id, data) =>
+  sessionRequest(`/api/accounts/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteAccount = (id) =>
+  sessionRequest(`/api/accounts/${id}`, { method: "DELETE" });
+export const logAccountNote = (id, note) =>
+  sessionRequest(`/api/accounts/${id}/log`, { method: "POST", body: JSON.stringify({ note }) });
+
 export const listTodos = (includeDone = false) =>
   sessionRequest(`/api/todos${includeDone ? "?include_done=true" : ""}`);
 export const addTodo = (text, due = "", priority = "") =>
