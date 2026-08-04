@@ -16,6 +16,7 @@ const MIST = "#F3F0EC";  // warm paper — page + chip backgrounds
 const SEA = "#922525";   // Star brand red — primary accent (labels, links, icons)
 const TIDE = "#C0392B";  // brighter alert red — overdue / urgent
 const SAND = "#C8B89A";  // warm sand — soft borders / non-urgent accents
+const ROW_LINE = "#e4dfd3"; // subtle warm table row separator (shared with the Accounts tab)
 
 const CATEGORIES = {
   bd: { label: "Business Dev", color: SEA },          // brand red
@@ -50,7 +51,7 @@ const fmtDate = (iso) => {
 };
 
 const blank = {
-  name: "", company: "", role: "", email: "", phone: "",
+  name: "", company: "", role: "", email: "", phone: "", phones: [],
   category: "bd", categoryLabel: "", nextAction: "", nextDue: "", notes: "", log: [],
 };
 
@@ -295,6 +296,10 @@ export default function StarCRM() {
         role: f.role || "",
         email: f.email || "",
         phone: f.phone || "",
+        // Claude classifies the card and reads typed phone numbers; prefill both
+        // (validated against known categories, else fall back to Business Dev).
+        phones: (f.phones && f.phones.length) ? f.phones : (f.phone ? [{ type: "work", number: f.phone }] : []),
+        category: (f.category && CATEGORIES[f.category]) ? f.category : "bd",
         cardImage: f.cardImage || null,
       });
     } catch (err) {
@@ -389,11 +394,11 @@ export default function StarCRM() {
       <div className="max-w-5xl lg:max-w-[calc(64rem+(100vw-64rem)/2)] mx-auto px-4 py-6">
 
         {/* Header */}
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-6 border-b-2 pb-4" style={{ borderColor: INK }}>
-          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:gap-4">
-            {/* Fixed width so the tab buttons keep the same position on every
-                view — the titles vary in length and used to shift the row. */}
-            <div className="sm:w-60 shrink-0">
+        <header className="mb-6 border-b-2 pb-4" style={{ borderColor: INK }}>
+          {/* Row 1: title + board actions. The action buttons live ABOVE the tab
+              bar so a growing tab list never competes with them for width. */}
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
               <div className="font-mono text-xs tracking-[0.25em] uppercase mb-1 whitespace-nowrap" style={{ color: SEA }}>
                 {view === "chat" ? "AI assistant" : view === "tasks" ? "Task board" : view === "mileage" ? "Mileage tracker" : view === "accounts" ? "Shared hit list" : "Relationships"}
               </div>
@@ -401,43 +406,51 @@ export default function StarCRM() {
                 <span style={{ color: SEA }}>★</span> {view === "chat" ? "Starbot" : view === "tasks" ? "Star Tasks" : view === "mileage" ? "Star Mileage" : view === "accounts" ? "Star Accounts" : "Star CRM"}
               </h1>
             </div>
-            {/* Segmented control: buttons sit inset (p-0.5 + own rounding) so the
-                active pill never collides with the group border. shrink-0 keeps
-                the tabs from being squished by long profile names in the row. */}
-            <div className="flex shrink-0 gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid #cdd6d4" }}>
-              <button
-                onClick={() => switchView("chat")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
-                style={view === "chat" ? { background: INK, color: "white" } : { background: "white", color: INK }}
-              >
+            {view === "board" && (
+              <div className="flex items-center flex-wrap gap-2">
+                <span className="font-mono text-xs" style={{ color: saveState === "error" ? TIDE : SEA }}>
+                  {saveState === "saving" ? "saving…" : saveState === "saved" ? "saved ✓" : saveState === "error" ? "save failed" : ""}
+                </span>
+                <button onClick={resetData} title="Reset data" className="p-2 rounded hover:bg-white" style={{ color: INK }}>
+                  <RotateCcw size={16} />
+                </button>
+                <input ref={cardInputRef} type="file" accept="image/*" onChange={handleScanFile} className="hidden" />
+                <button
+                  onClick={() => { setScanError(""); setCameraOpen(true); }}
+                  disabled={scanning}
+                  title="Scan a business card with the camera"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium"
+                  style={{ background: "white", color: INK, border: "1px solid #cdd6d4", opacity: scanning ? 0.6 : 1 }}
+                >
+                  <Camera size={16} /> {scanning ? "Reading…" : "Scan card"}
+                </button>
+                <button
+                  onClick={() => setEditing({ ...blank })}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded text-white text-sm font-medium"
+                  style={{ background: INK }}
+                >
+                  <Plus size={16} /> Add contact
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Row 2: the tab bar (+ profile switcher on the CRM board) */}
+          <div className="flex flex-wrap items-center gap-3 mt-4">
+            <div className="flex gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid #cdd6d4" }}>
+              <button onClick={() => switchView("chat")} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap" style={view === "chat" ? { background: INK, color: "white" } : { background: "white", color: INK }}>
                 <Sparkles size={14} /> Starbot
               </button>
-              <button
-                onClick={() => switchView("tasks")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
-                style={view === "tasks" ? { background: INK, color: "white" } : { background: "white", color: INK }}
-              >
+              <button onClick={() => switchView("tasks")} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap" style={view === "tasks" ? { background: INK, color: "white" } : { background: "white", color: INK }}>
                 <ListTodo size={14} /> Tasks
               </button>
-              <button
-                onClick={() => switchView("mileage")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
-                style={view === "mileage" ? { background: INK, color: "white" } : { background: "white", color: INK }}
-              >
+              <button onClick={() => switchView("mileage")} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap" style={view === "mileage" ? { background: INK, color: "white" } : { background: "white", color: INK }}>
                 <Car size={14} /> Mileage
               </button>
-              <button
-                onClick={() => switchView("board")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
-                style={view === "board" ? { background: INK, color: "white" } : { background: "white", color: INK }}
-              >
+              <button onClick={() => switchView("board")} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap" style={view === "board" ? { background: INK, color: "white" } : { background: "white", color: INK }}>
                 <LayoutGrid size={14} /> CRM
               </button>
-              <button
-                onClick={() => switchView("accounts")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
-                style={view === "accounts" ? { background: INK, color: "white" } : { background: "white", color: INK }}
-              >
+              <button onClick={() => switchView("accounts")} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap" style={view === "accounts" ? { background: INK, color: "white" } : { background: "white", color: INK }}>
                 <Building2 size={14} /> Accounts
               </button>
             </div>
@@ -452,39 +465,6 @@ export default function StarCRM() {
               />
             )}
           </div>
-          {view === "board" && (
-          <div className="flex items-center flex-wrap gap-2">
-            <span className="font-mono text-xs" style={{ color: saveState === "error" ? TIDE : SEA }}>
-              {saveState === "saving" ? "saving…" : saveState === "saved" ? "saved ✓" : saveState === "error" ? "save failed" : ""}
-            </span>
-            <button onClick={resetData} title="Reset data" className="p-2 rounded hover:bg-white" style={{ color: INK }}>
-              <RotateCcw size={16} />
-            </button>
-            <input
-              ref={cardInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleScanFile}
-              className="hidden"
-            />
-            <button
-              onClick={() => { setScanError(""); setCameraOpen(true); }}
-              disabled={scanning}
-              title="Scan a business card with the camera"
-              className="flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium"
-              style={{ background: "white", color: INK, border: "1px solid #cdd6d4", opacity: scanning ? 0.6 : 1 }}
-            >
-              <Camera size={16} /> {scanning ? "Reading…" : "Scan card"}
-            </button>
-            <button
-              onClick={() => setEditing({ ...blank })}
-              className="flex items-center gap-1.5 px-3 py-2 rounded text-white text-sm font-medium"
-              style={{ background: INK }}
-            >
-              <Plus size={16} /> Add contact
-            </button>
-          </div>
-          )}
         </header>
 
         {/* Starbot chat tab */}
@@ -572,7 +552,12 @@ export default function StarCRM() {
                 )}
                 <div className="flex gap-3 mt-2 flex-wrap">
                   {selected.email && <a href={"mailto:" + selected.email} className="flex items-center gap-1 text-sm underline" style={{ color: SEA }}><Mail size={14} />{selected.email}</a>}
-                  {selected.phone && <span className="flex items-center gap-1 text-sm"><Phone size={14} style={{ color: SEA }} />{selected.phone}</span>}
+                  {(selected.phones || []).map((p, i) => (
+                    <span key={i} className="flex items-center gap-1 text-sm">
+                      <Phone size={14} style={{ color: SEA }} />{p.number}
+                      {p.type ? <span className="text-xs" style={{ color: "#8b9a9f" }}>· {p.type.charAt(0).toUpperCase() + p.type.slice(1)}</span> : null}
+                    </span>
+                  ))}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -658,38 +643,46 @@ export default function StarCRM() {
               ))}
             </div>
 
-            <ul className="space-y-2">
-              {filtered.map((c) => {
-                const overdue = c.nextDue && c.nextDue < todayISO();
-                return (
-                  <li key={c.id}>
-                    <button
-                      onClick={() => setSelectedId(c.id)}
-                      className="w-full text-left bg-white rounded p-3 flex items-center gap-3 border-l-4 hover:shadow-sm transition-shadow"
-                      style={{ borderColor: catColor(c) }}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline gap-2 flex-wrap">
-                          <span className="font-semibold">{c.name}</span>
-                          <span className="text-sm" style={{ color: "#4a5a60" }}>{c.company}</span>
-                        </div>
-                        {c.nextAction && (
-                          <div className="text-sm truncate mt-0.5" style={{ color: overdue ? TIDE : "#6b7a80" }}>
-                            → {c.nextAction}{c.nextDue ? " (" + c.nextDue + ")" : ""}
-                          </div>
-                        )}
-                      </div>
-                      <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded shrink-0" style={{ background: MIST, color: catColor(c) }}>
-                        {catLabel(c)}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-              {filtered.length === 0 && (
-                <li className="text-sm text-center py-8" style={{ color: "#8b9a9f" }}>No contacts match. Clear the search or add a new contact.</li>
-              )}
-            </ul>
+            <div className="bg-white rounded-lg border overflow-x-auto" style={{ borderColor: "#cdd6d4" }}>
+              <table className="w-full text-sm" style={{ minWidth: 720 }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #cdd6d4" }}>
+                    {["Name", "Company", "Role", "Email", "Phone", "Next action", "Category"].map((h) => (
+                      <th key={h} className="px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-left" style={{ color: "#6b7a80" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((c) => {
+                    const overdue = c.nextDue && c.nextDue < todayISO();
+                    return (
+                      <tr key={c.id} onClick={() => setSelectedId(c.id)} className="cursor-pointer hover:bg-stone-50" style={{ borderBottom: "1px solid " + ROW_LINE }}>
+                        <td className="px-3 py-2.5 align-top" style={{ borderLeft: "3px solid " + catColor(c) }}>
+                          <div className="font-semibold break-words" style={{ color: INK, maxWidth: "18rem" }}>{c.name}</div>
+                        </td>
+                        <td className="px-3 py-2.5">{c.company ? <div className="truncate" style={{ color: "#4a5a60", maxWidth: "12rem" }}>{c.company}</div> : <span style={{ color: "#b0b8ba" }}>—</span>}</td>
+                        <td className="px-3 py-2.5">{c.role ? <div className="truncate" style={{ color: "#4a5a60", maxWidth: "9rem" }}>{c.role}</div> : <span style={{ color: "#b0b8ba" }}>—</span>}</td>
+                        <td className="px-3 py-2.5">{c.email ? <a href={"mailto:" + c.email} onClick={(e) => e.stopPropagation()} className="underline truncate align-bottom" style={{ color: SEA, maxWidth: "14rem", display: "inline-block" }}>{c.email}</a> : <span style={{ color: "#b0b8ba" }}>—</span>}</td>
+                        <td className="px-3 py-2.5 font-mono text-[12px] whitespace-nowrap" style={{ color: "#4a5a60" }}>
+                          {c.phone ? <>{c.phone}{(c.phones && c.phones.length > 1) ? <span style={{ color: "#b0b8ba" }}> +{c.phones.length - 1}</span> : null}</> : <span style={{ color: "#b0b8ba" }}>—</span>}
+                        </td>
+                        <td className="px-3 py-2.5 align-top">
+                          {c.nextAction
+                            ? <div className="text-[13px] line-clamp-2" style={{ color: overdue ? TIDE : "#4a5a60", maxWidth: "22rem" }}>{c.nextAction}{c.nextDue ? <span className="font-mono text-[11px]" style={{ color: overdue ? TIDE : "#8b9a9f" }}> ({c.nextDue})</span> : null}</div>
+                            : <span style={{ color: "#b0b8ba" }}>—</span>}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded whitespace-nowrap" style={{ background: MIST, color: catColor(c) }}>{catLabel(c)}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filtered.length === 0 && (
+                    <tr><td colSpan={7} className="text-sm text-center py-8" style={{ color: "#8b9a9f" }}>No contacts match. Clear the search or add a new contact.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
         </>}
@@ -699,8 +692,20 @@ export default function StarCRM() {
 }
 
 function ContactForm({ initial, onCancel, onSave }) {
-  const [form, setForm] = useState(initial);
+  // Always keep at least one phone row so there's a field to type into (empty
+  // rows are dropped server-side on save).
+  const [form, setForm] = useState(() => ({
+    ...initial,
+    phones: (initial.phones && initial.phones.length) ? initial.phones : [{ type: "cell", number: "" }],
+  }));
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const setPhoneField = (i, k) => (e) => {
+    const next = form.phones.slice();
+    next[i] = { ...next[i], [k]: e.target.value };
+    setForm({ ...form, phones: next });
+  };
+  const addPhone = () => setForm({ ...form, phones: [...form.phones, { type: "cell", number: "" }] });
+  const removePhone = (i) => setForm({ ...form, phones: form.phones.filter((_, j) => j !== i) });
   const field = "w-full bg-white border rounded px-3 py-2 text-sm";
   const bc = { borderColor: "#cdd6d4" };
   const cap = "font-mono text-[10px] uppercase tracking-widest block mb-1";
@@ -747,10 +752,24 @@ function ContactForm({ initial, onCancel, onSave }) {
           <span className={cap} style={{ color: SEA }}>Email</span>
           <input className={field} style={bc} placeholder="jane@acme.com" value={form.email} onChange={set("email")} />
         </label>
-        <label className="block">
-          <span className={cap} style={{ color: SEA }}>Phone</span>
-          <input className={field} style={bc} placeholder="(619) 555-0100" value={form.phone} onChange={set("phone")} />
-        </label>
+        <div className="block sm:col-span-2">
+          <span className={cap} style={{ color: SEA }}>Phone numbers</span>
+          <div className="space-y-2">
+            {form.phones.map((p, i) => (
+              <div key={i} className="flex gap-2">
+                <select className="border rounded px-2 py-2 text-sm bg-white shrink-0" style={bc} value={p.type || "cell"} onChange={setPhoneField(i, "type")}>
+                  <option value="cell">Cell</option>
+                  <option value="work">Work</option>
+                  <option value="home">Home</option>
+                  <option value="other">Other</option>
+                </select>
+                <input className={field} style={bc} maxLength={40} autoComplete="off" placeholder="(619) 555-0100" value={p.number} onChange={setPhoneField(i, "number")} />
+                <button type="button" onClick={() => removePhone(i)} className="px-2 rounded hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Remove"><X size={15} /></button>
+              </div>
+            ))}
+            <button type="button" onClick={addPhone} className="text-xs font-medium flex items-center gap-1" style={{ color: SEA }}><Plus size={13} /> Add phone number</button>
+          </div>
+        </div>
         <label className="block">
           <span className={cap} style={{ color: SEA }}>Next action</span>
           <input className={field} style={bc} placeholder="Call re: estimate" value={form.nextAction} onChange={set("nextAction")} />
@@ -832,6 +851,7 @@ function CardCamera({ onCapture, onClose, onUseFile }) {
   const [preview, setPreview] = useState(""); // object URL of the frozen frame
   const [ready, setReady] = useState(false);  // stream is live, capture allowed
   const [err, setErr] = useState("");
+  const [mirror, setMirror] = useState(false); // front/desktop cam → mirror the live preview
 
   useEffect(() => {
     let cancelled = false;
@@ -847,6 +867,13 @@ function CardCamera({ onCapture, onClose, onUseFile }) {
         });
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         streamRef.current = stream;
+        // Mirror the LIVE preview only for a front-facing (desktop/webcam) camera
+        // so the operator frames the card naturally — moving it left moves it left
+        // on screen. The mobile rear camera (facingMode "environment") is left as-is.
+        // The CAPTURE is un-mirrored (snap() draws the raw frame), so card text is
+        // never reversed.
+        const facing = stream.getVideoTracks()[0]?.getSettings?.().facingMode;
+        if (!cancelled) setMirror(facing !== "environment");
         const v = videoRef.current;
         if (v) {
           v.srcObject = stream;
@@ -924,7 +951,7 @@ function CardCamera({ onCapture, onClose, onUseFile }) {
               muted
               autoPlay
               className="w-full h-full object-cover"
-              style={{ display: preview ? "none" : "block" }}
+              style={{ display: preview ? "none" : "block", transform: mirror ? "scaleX(-1)" : "none" }}
             />
             {preview && (
               <img src={preview} alt="Captured card" className="w-full h-full object-contain" style={{ background: "#000" }} />

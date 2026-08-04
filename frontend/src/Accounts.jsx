@@ -14,6 +14,7 @@ const MIST = "#F3F0EC";
 const SEA = "#922525";
 const TIDE = "#C0392B";
 const BORDER = "#cdd6d4";
+const ROW_LINE = "#e4dfd3"; // subtle warm row separator (shared with the CRM tab)
 
 // Status: label + a soft-tinted pill. Order doubles as the pipeline sequence.
 const STATUS = {
@@ -280,7 +281,7 @@ export default function Accounts() {
               const primary = a.contacts?.[0];
               const extra = (a.contacts?.length || 0) - 1;
               return (
-                <tr key={a.id} onClick={() => setViewing(a)} className="cursor-pointer hover:bg-stone-50" style={{ borderBottom: "1px solid #f0ece5" }}>
+                <tr key={a.id} onClick={() => setViewing(a)} className="cursor-pointer hover:bg-stone-50" style={{ borderBottom: "1px solid " + ROW_LINE }}>
                   <td className="px-3 py-2.5 align-top">
                     <div className="font-semibold break-words" style={{ color: INK, maxWidth: "18rem" }}>{a.name}</div>
                     {a.addresses?.[0] && <div className="text-xs truncate" style={{ color: "#8b9a9f", maxWidth: "18rem" }}>{a.addresses[0]}</div>}

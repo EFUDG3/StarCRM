@@ -9,6 +9,7 @@ until that auth layer exists.
 Run locally:
     uvicorn main:app --reload
 """
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import date as date_cls
@@ -51,6 +52,10 @@ def _ensure_schema() -> None:
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS category_label VARCHAR"))
+        # Multiple typed phone numbers per contact (cell/work/home). Additive;
+        # existing single `phone` values are surfaced as a one-entry list by
+        # serialize() until the contact is next edited.
+        conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS phones_json TEXT"))
         # Card-image storage removed 2026-07 (space + UI cleanup; scans still
         # prefill contacts, the photo just isn't kept). Blobs were exported to
         # ~/Documents/starbot-card-image-backup before this shipped.
@@ -132,19 +137,39 @@ def today_iso() -> str:
     return date_cls.today().isoformat()
 
 
+def _contact_phones(c: Contact) -> list:
+    """Parse a contact's phones_json into [{type, number}]; fall back to the
+    legacy single `phone` so older rows still surface a number."""
+    phones = []
+    try:
+        for p in json.loads(c.phones_json or "[]"):
+            if isinstance(p, dict) and str(p.get("number", "")).strip():
+                phones.append({
+                    "type": str(p.get("type", "") or "").strip(),
+                    "number": str(p.get("number")).strip(),
+                })
+    except Exception:
+        phones = []
+    if not phones and (c.phone or "").strip():
+        phones.append({"type": "", "number": c.phone.strip()})
+    return phones
+
+
 def serialize(c: Contact) -> dict:
     """Return a contact in the exact shape the React frontend expects.
 
     Interactions are sorted newest-first so the activity log reads top-down.
     """
     log = sorted(c.interactions, key=lambda i: i.date, reverse=True)
+    phones = _contact_phones(c)
     return {
         "id": c.id,
         "name": c.name,
         "company": c.company or "",
         "role": c.role or "",
         "email": c.email or "",
-        "phone": c.phone or "",
+        "phone": phones[0]["number"] if phones else (c.phone or ""),
+        "phones": phones,
         "category": c.category or "bd",
         "categoryLabel": c.category_label or "",
         "nextAction": c.next_action or "",
@@ -153,6 +178,24 @@ def serialize(c: Contact) -> dict:
         "created": c.created_at.date().isoformat() if c.created_at else "",
         "log": [{"date": i.date, "note": i.note} for i in log],
     }
+
+
+def _clean_phones_payload(payload) -> tuple[str, str]:
+    """From a ContactIn, return (phones_json, primary_number). Accepts the new
+    `phones` list of {type, number}; falls back to the legacy single `phone`."""
+    phones = []
+    for p in (getattr(payload, "phones", None) or []):
+        if isinstance(p, dict):
+            num = str(p.get("number", "") or "").strip()
+            typ = str(p.get("type", "") or "").strip().lower()
+        else:
+            num, typ = str(p).strip(), ""
+        if num:
+            phones.append({"type": typ, "number": num[:40]})
+    if not phones and (payload.phone or "").strip():
+        phones.append({"type": "", "number": payload.phone.strip()[:40]})
+    phones = phones[:8]
+    return json.dumps(phones), (phones[0]["number"] if phones else "")
 
 
 def load_seed(db: Session, user: User) -> None:
@@ -421,13 +464,15 @@ def create_contact(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    phones_json, primary = _clean_phones_payload(payload)
     contact = Contact(
         user_id=user.id,
         name=payload.name,
         company=payload.company,
         role=payload.role,
         email=payload.email,
-        phone=payload.phone,
+        phone=primary,
+        phones_json=phones_json,
         category=payload.category,
         category_label=payload.categoryLabel,
         next_action=payload.nextAction,
@@ -458,11 +503,13 @@ def update_contact(
     db: Session = Depends(get_db),
 ) -> dict:
     contact = _get_or_404(db, user, contact_id)
+    phones_json, primary = _clean_phones_payload(payload)
     contact.name = payload.name
     contact.company = payload.company
     contact.role = payload.role
     contact.email = payload.email
-    contact.phone = payload.phone
+    contact.phone = primary
+    contact.phones_json = phones_json
     contact.category = payload.category
     contact.category_label = payload.categoryLabel
     contact.next_action = payload.nextAction

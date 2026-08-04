@@ -16,7 +16,8 @@ class ContactIn(BaseModel):
     company: str = ""
     role: str = ""
     email: str = ""
-    phone: str = ""
+    phone: str = ""            # legacy single number; still accepted
+    phones: list = []          # list of {type, number} — cell/work/home/other
     category: str = "bd"
     categoryLabel: str = ""  # free-text label used when category == "other"
     nextAction: str = ""

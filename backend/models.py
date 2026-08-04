@@ -103,8 +103,9 @@ class Contact(Base):
     company = Column(String, default="")
     role = Column(String, default="")
     email = Column(String, default="")
-    phone = Column(String, default="")
-    category = Column(String, default="bd")  # bd|gc|vendor|property|client|sub|designer|insurance|other
+    phone = Column(String, default="")       # primary number (first of phones_json); kept for the table + back-compat
+    phones_json = Column(Text, default="[]")  # JSON list of {type, number} — cell/work/home/other
+    category = Column(String, default="bd")  # bd|gc|vendor|property|client|sub|designer|insurance|healthcare|other
     category_label = Column(String, nullable=True)  # free-text label when category == "other"
     next_action = Column(Text, default="")
     next_due = Column(String, default="")    # ISO date string, may be empty

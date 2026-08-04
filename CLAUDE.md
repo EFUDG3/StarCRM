@@ -69,6 +69,20 @@ This file is the single source of truth for picking the project back up. Read it
 >   Source of the mgmt-co list TBD (Ethan checking). CSVs in `Downloads/`: `Star Hit List
 >   II(Management Companies).csv`, `Star Hit List(flooring department).csv`.
 
+> - **Refinements (revs 36→39, live `starbot--0000039`):** the personal CRM list is now a
+>   SPREADSHEET table (name/company/role/email/phone/next-action/category; the Next-action cell
+>   clamps to 2 lines, other free-text columns truncate; shared `ROW_LINE = #e4dfd3` row separator
+>   used by BOTH the CRM and Accounts tables). Card scan now AUTO-CLASSIFIES the category
+>   (Sharp/Kaiser/Scripps → healthcare; the Haiku prompt in `cards.py` returns `category` + typed
+>   `phones`, validated server-side). Contacts hold MULTIPLE typed phone numbers
+>   {type: cell/work/home/other} in `contacts.phones_json` (additive migration; the primary number
+>   is still mirrored into `phone` for the table + connector; helpers `_clean_phones_payload` /
+>   `_contact_phones` in main.py). Front/desktop card-camera PREVIEW is mirrored (`scaleX(-1)`) for
+>   natural framing; the CAPTURE is un-mirrored so text never reverses, and the mobile rear cam is
+>   left alone (keyed on `getVideoTracks()[0].getSettings().facingMode !== "environment"`). Header
+>   restructured: Scan card / Add contact sit ABOVE the tab bar, tabs on their own row so the
+>   growing tab list never crowds them.
+
 > **Resume note (2026-07-30) — chat UX fixes + Board→CRM + live webcam card scan shipped; Tasks aggregator DESIGNED.**
 > - **Chat UX (LIVE, rev `starbot--0000030` / image `ui-chunked`):** streaming paints in
 >   ~90ms chunks not per-token (buffer in `Chat.jsx` `send()`); mid-stream scroll no longer

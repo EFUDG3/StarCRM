@@ -14,13 +14,35 @@ from PIL import Image
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 
 _PROMPT = (
-    "You are reading a business card. Extract the contact details and return "
-    "ONLY a JSON object with exactly these keys: name, company, role, email, "
-    "phone. Use an empty string for anything not present. Do not guess. 'role' "
-    "is the person's job title. Return just the JSON, with no prose or code fences."
+    "You are reading a business card for a flooring & remodeling company's CRM. "
+    "Return ONLY a JSON object with exactly these keys: name, company, role, "
+    "email, phones, category.\n"
+    "- name: the person's full name.\n"
+    "- company, role: strings ('role' is the job title). Empty string if absent.\n"
+    "- email: string, empty if absent.\n"
+    "- phones: an ARRAY of objects {type, number}, one per phone number on the "
+    "card. 'type' is one of 'cell', 'work', 'home', 'other' — infer from labels "
+    "(C/cell/mobile/M -> cell; O/office/direct/main/tel -> work; H/home -> home; "
+    "fax -> other). If a number has no label, use 'work'. Empty array if none.\n"
+    "- category: the best-fit CRM relationship type, ONE of: gc (general "
+    "contractor), sub (subcontractor/trade), vendor (materials or product "
+    "supplier), property (property management company or landlord), client "
+    "(end customer/homeowner), designer (designer or architect), insurance "
+    "(insurance company or adjuster), healthcare (hospital, clinic, or medical "
+    "group such as Sharp, Kaiser, or Scripps), bd (a generic business lead when "
+    "genuinely unsure), other. Choose the most specific fit.\n"
+    "Do not guess missing details. Return just the JSON, no prose or code fences."
 )
 
-_EMPTY = {"name": "", "company": "", "role": "", "email": "", "phone": ""}
+# Valid CRM categories and phone types (mirror the frontend). Anything the model
+# returns outside these sets falls back to a safe default in coerce_fields.
+_CATEGORIES = {
+    "bd", "gc", "vendor", "property", "client", "sub",
+    "designer", "insurance", "healthcare", "other",
+}
+_PHONE_TYPES = {"cell", "work", "home", "other"}
+
+_EMPTY = {"name": "", "company": "", "role": "", "email": "", "phone": "", "phones": [], "category": "bd"}
 
 
 def downscale_to_jpeg(raw: bytes, max_dim: int = 1200, quality: int = 85) -> bytes:
@@ -93,15 +115,41 @@ def extract_fields(jpeg_bytes: bytes) -> dict:
 
 
 def coerce_fields(text: str) -> dict:
-    """Parse the model's JSON, tolerating stray prose or code fences."""
-    fields = dict(_EMPTY)
+    """Parse the model's JSON, tolerating stray prose or code fences. Validates
+    category + phone types against the known sets, and always returns `phone`
+    (the primary number) for older callers alongside the `phones` array."""
+    fields = {"name": "", "company": "", "role": "", "email": "", "phone": "", "phones": [], "category": "bd"}
     try:
         start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end != -1:
-            data = json.loads(text[start : end + 1])
-            for k in fields:
-                v = data.get(k, "")
-                fields[k] = str(v).strip() if v is not None else ""
+        if start == -1 or end == -1:
+            return fields
+        data = json.loads(text[start : end + 1])
+        for k in ("name", "company", "role", "email"):
+            v = data.get(k, "")
+            fields[k] = str(v).strip() if v is not None else ""
+
+        cat = str(data.get("category", "") or "").strip().lower()
+        fields["category"] = cat if cat in _CATEGORIES else "bd"
+
+        phones = []
+        raw = data.get("phones")
+        if isinstance(raw, list):
+            for p in raw:
+                if isinstance(p, dict):
+                    num = str(p.get("number", "") or "").strip()
+                    typ = str(p.get("type", "") or "").strip().lower()
+                else:
+                    num, typ = str(p).strip(), ""
+                if num:
+                    phones.append({"type": typ if typ in _PHONE_TYPES else "work", "number": num})
+        elif isinstance(raw, str) and raw.strip():
+            phones.append({"type": "work", "number": raw.strip()})
+        # Fall back to a legacy single `phone` key if the model used one.
+        if not phones and str(data.get("phone", "") or "").strip():
+            phones.append({"type": "work", "number": str(data["phone"]).strip()})
+
+        fields["phones"] = phones[:6]
+        fields["phone"] = phones[0]["number"] if phones else ""
     except Exception:
         pass
     return fields
