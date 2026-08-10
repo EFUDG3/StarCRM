@@ -698,6 +698,18 @@ function ContactForm({ initial, onCancel, onSave }) {
     ...initial,
     phones: (initial.phones && initial.phones.length) ? initial.phones : [{ type: "cell", number: "" }],
   }));
+
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (busy || !form.name.trim()) return;
+      setBusy(true);
+    try {
+      await onSave(form);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const setPhoneField = (i, k) => (e) => {
     const next = form.phones.slice();
@@ -784,7 +796,7 @@ function ContactForm({ initial, onCancel, onSave }) {
         <textarea className={field + " h-24"} style={bc} placeholder="Context, preferences, history…" value={form.notes} onChange={set("notes")} />
       </label>
       <div className="flex gap-2 mt-4">
-        <button onClick={() => onSave(form)} className="px-4 py-2 rounded text-white text-sm font-medium" style={{ background: INK }}>Save contact</button>
+        <button onClick={save} disabled={busy || !form.name.trim()} className="px-4 py-2 rounded text-white text-sm font-medium disabled:opacity-50" style={{ background: INK }}>{busy ? "Saving…" : "Save contact"}</button>
         <button onClick={onCancel} className="px-4 py-2 rounded text-sm" style={{ background: MIST }}>Cancel</button>
       </div>
     </section>
