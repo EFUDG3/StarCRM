@@ -24,7 +24,7 @@ This file is the single source of truth for picking the project back up. Read it
 > (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
 > + Rate columns; own calendar only.
 
-> **Resume note (2026-08-20, LATEST) - Hit List II imported into Accounts (120 rows); Projects tab BUILT (not yet deployed/committed).**
+> **Resume note (2026-08-20, LATEST) - Hit List II imported into Accounts (120 rows); Projects tab BUILT + SHIPPED (rev starbot--projects).**
 > - **Hit list migration DONE.** The real **Hit List II (management companies)** CSV is now in the shared
 >   Accounts table: **115 inserted, 120 total** (was the 5 pilot seeds). Source lives IN the project now:
 >   `Downloads/PersonalCRM/Star Hit List II(Management Companies).csv` (Ethan pulled a clean copy from
@@ -75,8 +75,25 @@ This file is the single source of truth for picking the project back up. Read it
 >   -> negative contractValue 422 -> cascade delete); `npm run build` clean (1759 modules); and a visual
 >   pass on the real board + detail view with 5 realistic demo rows. **All demo rows deleted afterward -
 >   `projects` and `project_interactions` are EMPTY, accounts still 120.**
-> - **NOT DONE:** not committed to git, not deployed (no new revision). Deploy is the usual
->   `az acr build` + `az containerapp update`; the tab appears as soon as the image ships.
+> - **SHIPPED + committed.** Commit `a168690` (Ethan pushed it himself, per usual). Deployed 2026-08-20:
+>   `az acr build --registry cadd18599bd0acr --image starbot:projects-tab .` (Run ID `ds1e`, 59s, digest
+>   `sha256:272af72f...`; base images python 3.12-slim + node 20-slim) then
+>   `az containerapp update -n starbot -g starbot --image cadd18599bd0acr.azurecr.io/starbot:projects-tab
+>   --revision-suffix projects`. **Live revision = `starbot--projects`** (Healthy, 1 replica, 100%
+>   traffic). Previous revision **`starbot--azuredb` kept Active at 0% traffic = the rollback target**
+>   (roll back by pointing `--image` back at `starbot:tasks-layout`).
+> - **Post-deploy verification (all passed):** the KEDA `business-hours` cron scale rule SURVIVED the
+>   image update - confirmed via `containerapp show` (timezone America/Los_Angeles, start `30 7 * * 1-5`,
+>   end `30 15 * * 1-5`, desiredReplicas 1, min 0 / max 10). `/api/health` 200 on BOTH the custom domain
+>   and the azurecontainerapps.io host (~1s, warm). **Identity check that actually proves the new build is
+>   serving: `/api/projects` returns 401, NOT 404** - the route exists and is auth-gated (a 404 would mean
+>   the old image was still live; see gotcha #3 above for why "health 200" alone proves nothing). Live JS
+>   bundle (`/assets/index-Co0khUUX.js`, 457 KB) greps clean for "Commercial jobs", "Star Projects",
+>   "Punch list", "starProjectsCollapsed", and "ranked by properties" - so both the new tab AND the
+>   Accounts table rework shipped.
+> - **No schema work on boot:** `projects` + `project_interactions` already existed in prod (created
+>   additively by `_ensure_schema()` during local testing), so the new revision just started serving.
+
 > - **File uploads DEFERRED (decision made 2026-08-20).** Ethan flagged flooring plans that run 200+
 >   pages; the real example in `Downloads/` is **103 MB** (`2026-01-30  Architectural Plans.pdf`), with a
 >   hand-carved **30 MB** `_flooring.pdf` extract. Conclusion: **do NOT put these in Postgres** (card
@@ -97,6 +114,60 @@ This file is the single source of truth for picking the project back up. Read it
 >   `m365.get_session_user` demands a signed cookie. To view the UI locally, start uvicorn with an
 >   explicit `SESSION_SECRET` (it is NOT in `backend/.env`, so it is ephemeral per-process otherwise) and
 >   mint `jwt.encode({'sub': <user_id>, 'exp': ...}, SECRET, 'HS256')` into the `starbot_session` cookie.
+
+> **Follow-up (2026-08-20, later) - favicon added; starbot can now read/update the SHARED Accounts + Projects boards. BUILT + TESTED, NOT YET DEPLOYED.**
+> - **Favicon (first one this app has ever had).** `frontend/public/favicon.svg` - a brand-red rounded
+>   plate with a WHITE 5-point star (matches the star in the app header). White-on-red on purpose: a bare
+>   red star disappears against a dark browser tab strip, and a filled shape reads better than a glyph at
+>   16px. Geometry verified programmatically (10 points, alternating radii 9.20/3.70, even 36 degree gaps,
+>   all inside the plate). Linked from `frontend/index.html` plus `<meta name="theme-color" content="#922525">`.
+>   **Why this path works:** Vite copies `public/*` to the dist ROOT, the Dockerfile does
+>   `COPY --from=frontend /fe/dist ./static`, and `serve_spa` in main.py serves any real file under
+>   ./static before falling back to index.html - so `/favicon.svg` resolves with the right content-type
+>   and needs NO new route. `public/` is not in `.dockerignore`, so it reaches the build context.
+>   (Not done: a `.ico` fallback for pre-2019 browsers, and an `apple-touch-icon` PNG for iOS
+>   home-screen installs. SVG favicons cover current Chrome/Edge/Firefox/Safari.)
+> - **Starbot tool surface: 12 -> 20 tools.** It could previously only see the PRIVATE per-user CRM; it
+>   now also reaches the two company-wide boards. New tools: `search_accounts`, `get_account`,
+>   `log_account_note`, `set_account_status`, `list_projects`, `get_project`, `log_project_note`,
+>   `set_project_stage`.
+> - **Where the logic lives:** new `op_*` functions at the bottom of `backend/accounts.py` and
+>   `backend/projects.py` (NOT in chat.py), so the domain logic sits with its module and the Claude
+>   connector can reuse it later. `chat.py` now does `import accounts` / `import projects` - verified
+>   NO import cycle (neither module imports chat or mcp_server; both only pull m365/telemetry/database/
+>   models/schemas). Stage/status validation imports the single source of truth from schemas
+>   (`_STAGES as VALID_STAGES`, `_STATUSES`) instead of re-declaring the sets.
+> - **Two deliberate design choices, both different from the CRM ops:**
+>   1. **NO user scoping.** Accounts and Projects are shared team assets, so every signed-in user sees
+>      every row - same as the tabs. (The CRM ops in mcp_server.py stay strictly user-scoped.)
+>   2. **Search returns COMPACT rows, not serialize().** serialize() carries every contact and every log
+>      line; 120 of those would dump the entire hit list into the model's context and blow the input
+>      budget. Search gives a summary row + id (caps: accounts 15 default / 40 max, projects 25 / 60) and
+>      reports `matched` / `returned` / `truncated` so the model KNOWS the list is cut. Detail comes from
+>      `get_account` / `get_project` for one id. Both list ops eager-load (`selectinload`) for the same
+>      N+1 reason as the HTTP endpoints.
+> - **Write surface is deliberately NARROW: log a note, set status/stage. NO create and NO delete from
+>   chat.** Creating shared rows from a chat model is how you get duplicates, and duplicate cleanup
+>   already cost a manual pass in Aug (Bob's 66 -> 42). The system prompt tells the model it cannot
+>   create/delete and to point the user at the tab instead. Unlike the HTTP layer (which COERCES a bad
+>   status/stage, because a form should never hard-fail), the op layer REJECTS unknown values with an
+>   error listing the valid ones, so a wrong guess comes back correctable.
+> - **System prompt updated** - the old text claimed everything was "always scoped to this signed-in
+>   user", which is no longer true. Now separates PRIVATE (email/calendar/files/todos/CRM) from the two
+>   SHARED boards, and adds two rules: (a) shared-board writes are team-visible with no undo in chat, so
+>   confirm the right record when a name is ambiguous and only write when clearly asked; (b) keep the
+>   boards straight - a school or restaurant job is a PROJECT, not an account.
+> - **Tested against live prod data (reads AND writes):** search by query/rep/status (rep matching splits
+>   on "/" so `rep=rudy` correctly matched 20 incl. "Rudy/Leighann"), get_account returned R.A. Snyder's
+>   2 contacts, truncation flags correct, and all three error paths return usable messages (bad id, bad
+>   status, bad stage). Writes were exercised then **fully reverted**: the account test snapshotted
+>   status/updated_at/updated_by + log ids, logged a note, flipped status, then deleted the interaction
+>   and restored the stamps (verified `fully restored: True`); the project test used a throwaway row and
+>   deleted it. **Prod is unchanged: accounts still 120, projects/project_interactions still 0.**
+> - **NOT DONE:** not committed, not deployed. Also NOT added to the Claude connector
+>   (`mcp_server.py`) - Ethan asked for starbot specifically. The op_* functions are already written and
+>   connector-shaped, so adding them there later is small (wrap them as MCP tools the same way the todo
+>   tools wrap chat.py's op_*), but it widens what claude.ai can touch, so it should be a deliberate call.
 
 > **Follow-up same day (2026-08-20) - Accounts table reshaped, N+1 fixed, rep casing normalized, dump deleted.**
 > - **Accounts spreadsheet columns are now: Account | Rep | Phone | Props | Units | Status | Updated.**

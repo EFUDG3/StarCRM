@@ -20,7 +20,7 @@ import m365
 import telemetry
 from database import get_db
 from models import Account, AccountContact, AccountInteraction, User
-from schemas import AccountIn, AccountLogIn
+from schemas import AccountIn, AccountLogIn, _STATUSES
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
@@ -222,6 +222,145 @@ def delete_account(
     db.delete(a)  # account_contacts cascade
     db.commit()
     telemetry.log_event(user.id, "accounts", "account_deleted")
+
+
+# --- Operations for starbot chat (and, later, the Claude connector) ----------
+#
+# These back the chat's account tools. Two deliberate differences from the CRM
+# ops in mcp_server.py:
+#
+#   1. NO user scoping. Accounts are a shared company-wide asset, so every
+#      signed-in user legitimately sees every account (same as the tab).
+#   2. Search returns COMPACT rows, not serialize(). serialize() carries every
+#      contact and every log line; 120 of those would dump the whole hit list
+#      into the model's context and blow the input budget. The model gets a
+#      summary row plus an id, and calls op_account_get for the one it needs.
+#
+# Write surface is intentionally narrow: log a note and set status. NO create
+# and NO delete from chat — this table is shared, and duplicate rows created by
+# a chatty model are exactly the mess that took a manual cleanup pass in Aug.
+
+_ACCT_SEARCH_DEFAULT = 15
+_ACCT_SEARCH_MAX = 40
+
+
+def _compact(a: Account) -> dict:
+    """One account as a summary row (no contacts/log bodies)."""
+    addrs = _clean_list(a.addresses_json)
+    return {
+        "id": a.id,
+        "name": a.name,
+        "rep": a.rep or "",
+        "status": a.status or "prospect",
+        "phone": a.phone or "",
+        "address": addrs[0] if addrs else "",
+        "numProperties": a.num_properties,
+        "totalUnits": a.total_units,
+        "contactCount": len(a.contacts),
+        "lastActivity": max((i.date for i in a.interactions), default=""),
+    }
+
+
+def _haystack(a: Account) -> str:
+    parts = [a.name, a.rep or "", a.notes or "", a.status or ""]
+    parts += _clean_list(a.addresses_json) + _clean_list(a.emails_json)
+    parts += [f"{c.name} {c.role or ''} {c.email or ''}" for c in a.contacts]
+    return " ".join(parts).lower()
+
+
+def _all_accounts(db: Session) -> list[Account]:
+    # Eager-load both relationships: _compact reads contacts + interactions on
+    # every row, so lazy loading would be 2 extra queries per account.
+    return (
+        db.query(Account)
+        .options(selectinload(Account.contacts), selectinload(Account.interactions))
+        .all()
+    )
+
+
+def op_account_search(
+    db: Session, query: str = "", rep: str = "", status: str = "", limit: int = 0
+) -> dict:
+    """Search the shared hit list. Ranked by unit count (biggest opportunity
+    first), same as the Accounts tab. Reports how many matched vs. returned so
+    the model knows when it is looking at a truncated list."""
+    rows = _all_accounts(db)
+    total = len(rows)
+
+    q = (query or "").strip().lower()
+    if q:
+        rows = [a for a in rows if q in _haystack(a)]
+    r = (rep or "").strip().lower()
+    if r:
+        # Reps come in as "Rudy" or "Salam / Leighann" — match any token.
+        rows = [
+            a for a in rows
+            if any(t.strip().startswith(r) for t in (a.rep or "").lower().split("/"))
+        ]
+    st = (status or "").strip().lower()
+    if st:
+        rows = [a for a in rows if (a.status or "prospect").lower() == st]
+
+    matched = len(rows)
+    rows.sort(key=lambda a: (a.total_units is None, -(a.total_units or 0)))
+    cap = max(1, min(int(limit or _ACCT_SEARCH_DEFAULT), _ACCT_SEARCH_MAX))
+    out = rows[:cap]
+    return {
+        "totalAccounts": total,
+        "matched": matched,
+        "returned": len(out),
+        "truncated": matched > len(out),
+        "accounts": [_compact(a) for a in out],
+    }
+
+
+def op_account_get(db: Session, account_id: str) -> dict:
+    """One account in full — contacts and the whole activity log."""
+    a = db.get(Account, account_id)
+    if a is None:
+        return {"error": f"No account with id {account_id}"}
+    return serialize(a)
+
+
+def op_account_log(
+    db: Session, user: User, account_id: str, note: str, date: str | None = None
+) -> dict:
+    """Append a dated note to a shared account's activity log, stamped with
+    who logged it (mirrors POST /api/accounts/{id}/log)."""
+    a = db.get(Account, account_id)
+    if a is None:
+        return {"error": f"No account with id {account_id}"}
+    text = (note or "").strip()
+    if not text:
+        return {"error": "note is required"}
+    a.interactions.append(
+        AccountInteraction(date=(date or _today()), note=text[:2000], by=user.name)
+    )
+    a.updated_at = _now()
+    a.updated_by = user.name
+    db.commit()
+    db.refresh(a)
+    telemetry.log_event(user.id, "accounts", "note_logged", "chat")
+    return serialize(a)
+
+
+def op_account_set_status(db: Session, user: User, account_id: str, status: str) -> dict:
+    """Move an account along the pipeline. Rejects unknown values rather than
+    silently coercing, so the model is told when it guessed wrong (the HTTP
+    layer coerces instead, because a form should never hard-fail)."""
+    a = db.get(Account, account_id)
+    if a is None:
+        return {"error": f"No account with id {account_id}"}
+    st = (status or "").strip().lower()
+    if st not in _STATUSES:
+        return {"error": f"Unknown status '{status}'. Valid: {sorted(_STATUSES)}"}
+    a.status = st
+    a.updated_at = _now()
+    a.updated_by = user.name
+    db.commit()
+    db.refresh(a)
+    telemetry.log_event(user.id, "accounts", "account_updated", "chat:status")
+    return _compact(a)
 
 
 # --- First-run seed: 5 real Hit List II rows for the pilot ------------------

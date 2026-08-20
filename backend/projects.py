@@ -24,7 +24,7 @@ import telemetry
 from database import get_db
 from models import Project, User
 from models import ProjectInteraction
-from schemas import ProjectIn, ProjectLogIn
+from schemas import ProjectIn, ProjectLogIn, _STAGES as VALID_STAGES
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -182,3 +182,158 @@ def delete_project(
     db.delete(p)  # project_interactions cascade
     db.commit()
     telemetry.log_event(user.id, "projects", "project_deleted")
+
+
+# --- Operations for starbot chat (and, later, the Claude connector) ----------
+#
+# Same shape and reasoning as the account ops: shared data (no user scoping),
+# compact rows on list so the whole job board doesn't flood the model's
+# context, and a narrow write surface — log a note and move stage. NO create
+# and NO delete from chat, since this table is team-shared.
+
+_PROJ_LIST_DEFAULT = 25
+_PROJ_LIST_MAX = 60
+
+# Live stages get date-ordered; closed ones fall to the bottom. Mirrors the
+# LIVE_STAGES set the frontend board uses for its urgency badge.
+_LIVE = ("bidding", "awarded", "in_progress", "punch_list")
+
+
+def _compact_project(p: Project) -> dict:
+    """One project as a summary row (job log reduced to its latest entry)."""
+    log = sorted(
+        p.interactions, key=lambda i: (i.date, i.created_at or datetime.min), reverse=True
+    )
+    latest = log[0] if log else None
+    return {
+        "id": p.id,
+        "name": p.name,
+        "client": p.client or "",
+        "stage": p.stage or "in_progress",
+        "pm": p.pm or "",
+        "projectType": p.project_type or "other",
+        "siteAddress": p.site_address or "",
+        "startDate": p.start_date or "",
+        "targetDate": p.target_date or "",
+        "contractValue": p.contract_value,
+        "sqFt": p.sq_ft,
+        "material": p.material or "",
+        "logEntries": len(log),
+        "latestLog": (
+            {"date": latest.date, "note": latest.note[:200], "by": latest.by or ""}
+            if latest else None
+        ),
+    }
+
+
+def _all_projects(db: Session) -> list[Project]:
+    # _compact_project reads interactions on every row — eager-load them.
+    return db.query(Project).options(selectinload(Project.interactions)).all()
+
+
+def op_project_list(
+    db: Session, stage: str = "", pm: str = "", query: str = "", limit: int = 0
+) -> dict:
+    """The shared job board. Live jobs first, ordered by soonest target date
+    (undated last); closed jobs after, most recently touched first."""
+    everything = _all_projects(db)
+    total = len(everything)
+    # Stage tally always reflects the WHOLE board, not the filtered slice, so
+    # the model can say "3 in progress, 2 bidding" even on a narrow query.
+    counts: dict[str, int] = {}
+    for p in everything:
+        k = p.stage or "in_progress"
+        counts[k] = counts.get(k, 0) + 1
+
+    rows = list(everything)
+    st = (stage or "").strip().lower()
+    if st:
+        if st not in VALID_STAGES:
+            return {"error": f"Unknown stage '{stage}'. Valid: {sorted(VALID_STAGES)}"}
+        rows = [p for p in rows if (p.stage or "in_progress") == st]
+    m = (pm or "").strip().lower()
+    if m:
+        rows = [
+            p for p in rows
+            if any(t.strip().startswith(m) for t in (p.pm or "").lower().split("/"))
+        ]
+    q = (query or "").strip().lower()
+    if q:
+        rows = [
+            p for p in rows
+            if q in " ".join([
+                p.name, p.client or "", p.site_address or "", p.material or "",
+                p.description or "", p.project_type or "", p.pm or "",
+            ]).lower()
+        ]
+
+    matched = len(rows)
+
+    def sort_key(p: Project):
+        live = (p.stage or "in_progress") in _LIVE
+        if live:
+            # Undated live jobs sort after dated ones, not before.
+            return (0, p.target_date or "9999-12-31", "")
+        return (1, "", p.updated_at.isoformat() if p.updated_at else "")
+
+    rows.sort(key=sort_key)
+    cap = max(1, min(int(limit or _PROJ_LIST_DEFAULT), _PROJ_LIST_MAX))
+    out = rows[:cap]
+
+    return {
+        "totalProjects": total,
+        "byStage": counts,
+        "matched": matched,
+        "returned": len(out),
+        "truncated": matched > len(out),
+        "projects": [_compact_project(p) for p in out],
+    }
+
+
+def op_project_get(db: Session, project_id: str) -> dict:
+    """One project in full, including the entire job log."""
+    p = db.get(Project, project_id)
+    if p is None:
+        return {"error": f"No project with id {project_id}"}
+    return serialize(p)
+
+
+def op_project_log(
+    db: Session, user: User, project_id: str, note: str, date: str | None = None
+) -> dict:
+    """Append a dated entry to a project's job log, stamped with who logged it
+    (mirrors POST /api/projects/{id}/log)."""
+    p = db.get(Project, project_id)
+    if p is None:
+        return {"error": f"No project with id {project_id}"}
+    text = (note or "").strip()
+    if not text:
+        return {"error": "note is required"}
+    p.interactions.append(
+        ProjectInteraction(date=(date or _today()), note=text[:2000], by=user.name)
+    )
+    p.updated_at = _now()
+    p.updated_by = user.name
+    db.commit()
+    db.refresh(p)
+    telemetry.log_event(user.id, "projects", "note_logged", "chat")
+    return serialize(p)
+
+
+def op_project_set_stage(db: Session, user: User, project_id: str, stage: str) -> dict:
+    """Move a job to another stage. Rejects unknown values rather than coercing,
+    so a wrong guess comes back as an error the model can correct (the HTTP
+    layer coerces instead, because a form should never hard-fail)."""
+    p = db.get(Project, project_id)
+    if p is None:
+        return {"error": f"No project with id {project_id}"}
+    st = (stage or "").strip().lower()
+    if st not in VALID_STAGES:
+        return {"error": f"Unknown stage '{stage}'. Valid: {sorted(VALID_STAGES)}"}
+    p.stage = st
+    p.updated_at = _now()
+    p.updated_by = user.name
+    db.commit()
+    db.refresh(p)
+    telemetry.log_event(user.id, "projects", "project_updated", "chat:stage")
+    return _compact_project(p)

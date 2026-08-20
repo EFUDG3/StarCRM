@@ -16,8 +16,10 @@ from datetime import date as date_cls
 import anthropic
 from sqlalchemy.orm import Session
 
+import accounts
 import graph
 import mcp_server
+import projects
 import telemetry
 from database import SessionLocal
 from models import Todo, User
@@ -309,6 +311,138 @@ TOOLS = [
             "required": ["contact_id"],
         },
     },
+    {
+        "name": "search_accounts",
+        "description": (
+            "Search the SHARED company Accounts board — the sales 'hit list' of property "
+            "management companies (~120 rows), visible to the whole team. Returns summary "
+            "rows ranked by unit count (biggest opportunity first). Use for questions like "
+            "'who owns the CONAM relationship', 'my accounts in La Mesa', 'biggest "
+            "prospects we haven't contacted'. Filter by rep to scope to a salesperson. "
+            "Call get_account for one account's contacts and full activity history."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "free text: company, city, contact, notes"},
+                "rep": {"type": "string", "description": "assigned salesperson's first name"},
+                "status": {"type": "string", "enum": ["prospect", "contacted", "active", "sold", "dead", "cod"]},
+                "limit": {"type": "integer", "description": "max rows (default 15, max 40)"},
+            },
+        },
+    },
+    {
+        "name": "get_account",
+        "description": (
+            "One shared account in full: every contact (name, role, email, phone) and the "
+            "whole dated activity log. Use after search_accounts to answer 'who do we know "
+            "there' or 'when did we last touch them'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"account_id": _STR},
+            "required": ["account_id"],
+        },
+    },
+    {
+        "name": "log_account_note",
+        "description": (
+            "Append a dated note to a shared account's activity log, stamped with the "
+            "signed-in user's name. Use when the user reports sales activity ('log that I "
+            "dropped samples at Hoban today'). The whole team sees it, so keep it factual "
+            "and confirm the account first if the name is ambiguous."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "account_id": _STR,
+                "note": _STR,
+                "date": {"type": "string", "description": "ISO date; defaults to today"},
+            },
+            "required": ["account_id", "note"],
+        },
+    },
+    {
+        "name": "set_account_status",
+        "description": (
+            "Move a shared account along the sales pipeline. Only when the user clearly "
+            "asks ('mark Fairfield as contacted')."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "account_id": _STR,
+                "status": {"type": "string", "enum": ["prospect", "contacted", "active", "sold", "dead", "cod"]},
+            },
+            "required": ["account_id", "status"],
+        },
+    },
+    {
+        "name": "list_projects",
+        "description": (
+            "The SHARED Projects board — large commercial construction jobs the PM team is "
+            "running (schools, restaurants, retail build-outs), visible to the whole team. "
+            "Live jobs first by soonest target completion. Returns a per-stage tally plus "
+            "summary rows including each job's latest log entry. Use for 'what's in "
+            "progress', 'which jobs are behind', 'what is Marc running'. Stages: bidding, "
+            "awarded, in_progress, punch_list, complete, lost. NOTE: this is separate from "
+            "the Accounts hit list — projects come through GCs and owners, not management "
+            "companies."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "stage": {"type": "string", "enum": ["bidding", "awarded", "in_progress", "punch_list", "complete", "lost"]},
+                "pm": {"type": "string", "description": "project manager's first name"},
+                "query": {"type": "string", "description": "free text: job, client, address, material"},
+                "limit": {"type": "integer", "description": "max rows (default 25, max 60)"},
+            },
+        },
+    },
+    {
+        "name": "get_project",
+        "description": (
+            "One project in full: scope, dates, contract value, square footage, and the "
+            "entire dated job log. Use after list_projects for 'where does that job stand'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"project_id": _STR},
+            "required": ["project_id"],
+        },
+    },
+    {
+        "name": "log_project_note",
+        "description": (
+            "Append a dated entry to a project's job log, stamped with the signed-in "
+            "user's name. Use for site visits, deliveries, delays, inspections ('log that "
+            "the Hoover gym subfloor passed moisture testing')."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project_id": _STR,
+                "note": _STR,
+                "date": {"type": "string", "description": "ISO date; defaults to today"},
+            },
+            "required": ["project_id", "note"],
+        },
+    },
+    {
+        "name": "set_project_stage",
+        "description": (
+            "Move a job to another stage on the shared board. Only when the user clearly "
+            "asks ('move Lincoln High to punch list')."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project_id": _STR,
+                "stage": {"type": "string", "enum": ["bidding", "awarded", "in_progress", "punch_list", "complete", "lost"]},
+            },
+            "required": ["project_id", "stage"],
+        },
+    },
 ]
 
 # Anthropic server-side web search: Claude issues the query, Anthropic runs it
@@ -328,9 +462,12 @@ def _system_prompt(user: User) -> str:
 {user.name} ({user.email or "email unknown"}). Today is {weekday}, {today} (Pacific time).
 
 You can read the user's Outlook email and calendar, search company SharePoint/OneDrive \
-files, manage their starbot to-do list, and look up their Star CRM contacts — via tools, \
-always scoped to this signed-in user. You can also search the web for current or general \
-information that isn't in the user's own data.
+files, manage their starbot to-do list, and look up their Star CRM contacts — those are all \
+PRIVATE to this signed-in user. You can also read and update two SHARED team boards that \
+everyone at Star sees: ACCOUNTS, the sales hit list of about 120 property-management \
+companies, and PROJECTS, the PM team's large commercial construction jobs such as schools \
+and restaurants. You can also search the web for current or general information that isn't \
+in Star's own data.
 
 Rules:
 - CITE SOURCES. When an answer draws on an email, event, or file, cite it inline as a \
@@ -342,6 +479,19 @@ results inline as markdown links to the source URL, same as any other source. Pr
 user's own email/calendar/files/CRM for anything internal; reach for the web only when the \
 answer lives outside Star's data. Don't search for things you already know confidently \
 unless the user wants current or verified info.
+- SHARED BOARDS ARE TEAM-VISIBLE, so treat writes carefully. Anything you log or change \
+on Accounts or Projects is seen and trusted by the whole company, and there is no undo in \
+chat. Search first, make sure you have the RIGHT record when a name is ambiguous (ask if \
+two could match), and only write when the user clearly asked you to. Never invent a \
+contact, a date, or a job detail. You CANNOT create or delete accounts or projects from \
+chat by design — for those, point the user at the Accounts or Projects tab.
+- KEEP THE TWO BOARDS STRAIGHT. Accounts is SALES prospecting: property-management \
+companies, an assigned rep, unit and property counts, a pipeline status. Projects is the PM \
+team's CONSTRUCTION work: a job name, the GC or owner as client, a stage, a project \
+manager, target completion. They are separate boards with no link between them, so a school \
+or restaurant job is a PROJECT, not an account. For either board, use search_accounts or \
+list_projects to get the overview, then get_account or get_project for one record's full \
+history — do not pull every record to answer a narrow question.
 - To-do requests ("make a to-do list from my emails"): call list_todos first, then scan \
 list_recent_emails (and the calendar when relevant), propose clear action items with due \
 dates when the email implies one, and add them with add_todos including source + \
@@ -401,6 +551,33 @@ def _run_tool(name: str, args: dict, user: User, db: Session, token: str):
         return mcp_server.op_search(db, user, args.get("query", ""))
     if name == "get_crm_contact":
         return mcp_server.op_get(db, user, args["contact_id"])
+    # --- Shared team boards (company-wide, NOT user-scoped) ---
+    if name == "search_accounts":
+        return accounts.op_account_search(
+            db, query=args.get("query", ""), rep=args.get("rep", ""),
+            status=args.get("status", ""), limit=int(args.get("limit") or 0),
+        )
+    if name == "get_account":
+        return accounts.op_account_get(db, args["account_id"])
+    if name == "log_account_note":
+        return accounts.op_account_log(
+            db, user, args["account_id"], args["note"], date=args.get("date"),
+        )
+    if name == "set_account_status":
+        return accounts.op_account_set_status(db, user, args["account_id"], args["status"])
+    if name == "list_projects":
+        return projects.op_project_list(
+            db, stage=args.get("stage", ""), pm=args.get("pm", ""),
+            query=args.get("query", ""), limit=int(args.get("limit") or 0),
+        )
+    if name == "get_project":
+        return projects.op_project_get(db, args["project_id"])
+    if name == "log_project_note":
+        return projects.op_project_log(
+            db, user, args["project_id"], args["note"], date=args.get("date"),
+        )
+    if name == "set_project_stage":
+        return projects.op_project_set_stage(db, user, args["project_id"], args["stage"])
     raise ValueError(f"Unknown tool: {name}")
 
 

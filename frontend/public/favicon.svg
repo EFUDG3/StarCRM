@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Star">
+  <!-- Star Flooring & Remodeling favicon: the brand star (matches the ★ in the
+       app header). Brand red plate with a white star so it stays legible on
+       both light and dark browser tab bars, and reads as a shape at 16px. -->
+  <rect x="1" y="1" width="30" height="30" rx="7" fill="#922525"/>
+  <path fill="#ffffff" d="M16 6.8 18.17 13.01 24.75 13.16 19.52 17.14 21.41 23.44 16 19.7 10.59 23.44 12.48 17.14 7.25 13.16 13.83 13.01Z"/>
+</svg>
