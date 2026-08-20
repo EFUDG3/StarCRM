@@ -24,7 +24,209 @@ This file is the single source of truth for picking the project back up. Read it
 > (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
 > + Rate columns; own calendar only.
 
-> **Resume note (2026-08-04, LATEST) — shared Accounts tab (the "hit list") shipped as a pilot.**
+> **Resume note (2026-08-20, LATEST) - Hit List II imported into Accounts (120 rows); Projects tab BUILT (not yet deployed/committed).**
+> - **Hit list migration DONE.** The real **Hit List II (management companies)** CSV is now in the shared
+>   Accounts table: **115 inserted, 120 total** (was the 5 pilot seeds). Source lives IN the project now:
+>   `Downloads/PersonalCRM/Star Hit List II(Management Companies).csv` (Ethan pulled a clean copy from
+>   SharePoint 2026-08-20). Import was dedup'd by **normalized name** (lowercase, strip periods/commas,
+>   collapse whitespace) so the 5 curated seeds were SKIPPED, not overwritten - CONAM kept its
+>   `rep='RJ Coons'` / `updated_by='Ethan Fudge'` edit and R.A. Snyder kept its 2 contacts. Address built
+>   as `Address 1, Address 2, City, CA ZIP` (the `c/o` lines ride along in Address 2); thousands-commas
+>   stripped from Total Units. Only `Hitzke` has no units (blank in source). Rows stamped
+>   `updated_by='import:hitlist-II'`. **Backup before the write:**
+>   `Downloads/PersonalCRM/accounts-backup-20260819-123049.json` (rollback point; the dry-run wrote a
+>   second, identical snapshot at -123022).
+> - **The OLD flooring-department hit list is DEAD** (Ethan, 2026-08-20) - no longer in use, do NOT import
+>   `Star Hit List(flooring department).csv`. The prior "clean it up later" plan is cancelled.
+> - **Known data nit (left as-is, Ethan's call pending):** reps came in verbatim, so `leighann` (1 row,
+>   lowercase) vs `Leighann` (13) will fragment her "My accounts" filter, which keys off first name.
+>   Slash-combos (`Rudy/Leighann`, `Salam/Leighann`) are fine - the UI splits on `/,&`. `RJ Coons` is a
+>   real pilot edit, not a typo; leave it.
+> - **NEW: Projects tab (`#projects`) - the PM team's commercial job board.** 6th tab. Purpose (Ethan):
+>   project managers tracking LARGE commercial jobs (schools, restaurants) so they "feel on top of what
+>   they're doing" walking into a weekly meeting. Deliberately lean - NOT a mini-Procore.
+>   **Separate from Accounts by design: Accounts = SALES hit list (mgmt companies), Projects = PM work
+>   (arrives via GCs/owners). No FK between them, and no Project->Account link** (Ethan: "that list is
+>   completely separate from the project managers").
+> - **Projects model:** `projects` (name, client [GC/owner, free text], site_address, project_type
+>   school|restaurant|retail|multifamily|office|other, `stage`, pm [free text + datalist, like Accounts'
+>   rep], contract_value, start_date, target_date, material, sq_ft, description, updated_at/updated_by)
+>   -> many `project_interactions` (dated job log, records `by`). Shared company-wide (session-cookie
+>   auth via `m365.get_session_user`), same as Accounts. Tables created by the normal additive
+>   `create_all` in `_ensure_schema()` - **no migration needed**; they already exist in prod (14 tables now).
+> - **Stages:** `in_progress` (default + "MAIN" lane, listed first) -> `punch_list` -> `awarded` ->
+>   `bidding` -> `complete` -> `lost`. Display order is meeting-order (what's running / wrapping /
+>   starting / chasing / closed), NOT pipeline order. Groups are collapsible with state persisted to
+>   localStorage (`starProjectsCollapsed`); in_progress/punch_list/awarded open by default. Empty
+>   non-main stages hide entirely; the in_progress lane always renders so a fresh board isn't blank.
+> - **Files:** `backend/projects.py` (list/create/get/update/delete + `POST /{id}/log`, mirrors
+>   accounts.py), `Project`/`ProjectInteraction` in models.py, `ProjectIn`/`ProjectLogIn` in schemas.py
+>   (caps mirror AccountIn; `stage`+`projectType` COERCED to known sets so the board can't grow a
+>   phantom column), `frontend/src/Projects.jsx`, api.js helpers, and the wiring spots in App.jsx
+>   (icon import, component import, hash-init, hash-sync, eyebrow "Commercial jobs", title
+>   "Star Projects", tab button `HardHat`, render).
+> - **UI details worth keeping:** target-date **urgency** badge (overdue / due today / <=7d) that only
+>   fires for LIVE stages - a finished job past its target isn't late. Dates are parsed from parts, NOT
+>   `new Date("2026-08-20")`, which is midnight UTC and renders a day early in Pacific. One-click
+>   **Move stage** row on the detail view (the edit a PM makes constantly, so it skips the form).
+>   Double-submit guard on the form (the 2026-08-11 CRM bug). Browser Back closes detail/form -> board.
+> - **Verified, not assumed:** all 6 endpoints in the OpenAPI schema; full CRUD smoke test against PROD
+>   (create -> log note stamped `Ethan Fudge` -> stage change preserving the log -> bogus stage coerced
+>   -> negative contractValue 422 -> cascade delete); `npm run build` clean (1759 modules); and a visual
+>   pass on the real board + detail view with 5 realistic demo rows. **All demo rows deleted afterward -
+>   `projects` and `project_interactions` are EMPTY, accounts still 120.**
+> - **NOT DONE:** not committed to git, not deployed (no new revision). Deploy is the usual
+>   `az acr build` + `az containerapp update`; the tab appears as soon as the image ships.
+> - **File uploads DEFERRED (decision made 2026-08-20).** Ethan flagged flooring plans that run 200+
+>   pages; the real example in `Downloads/` is **103 MB** (`2026-01-30  Architectural Plans.pdf`), with a
+>   hand-carved **30 MB** `_flooring.pdf` extract. Conclusion: **do NOT put these in Postgres** (card
+>   blobs were removed for exactly this reason and prod is a B1ms/32 GiB server) - the design would be
+>   **Azure Blob Storage + direct browser upload/download via short-lived SAS**, so a 100 MB file never
+>   streams through the container. Ethan's call for now: **"dropping architectural plans is probably best
+>   to be avoided"** - keep Projects light, no attachments. Natural phase-2 if it ever comes back:
+>   auto-extract the flooring sheets from a full architectural set (they already do it by hand).
+> - **Reference apps considered for the Projects design** (for future scope talks): Procore (commercial
+>   standard, far too heavy - borrow only its object model), Buildertrend/CoConstruct/JobTread (GC/
+>   remodeler tools - closest fit, what this is modeled on), Knowify (trade-contractor), monday/Asana
+>   (source of the stage-board pattern). Money stays thin on purpose - QuickBooks (QBO connector) is the
+>   book of record.
+> - **Local-dev gotchas found this run (both cost real time):** (1) `uvicorn` failing to bind
+>   (`WinError 10048`) still logs "Application startup complete" from the dying process, so a STALE
+>   server keeps serving and your new env vars appear to be ignored - grep the log for `10048` and kill
+>   the PID from `netstat -ano`, don't trust `pkill`. (2) There is **no local auth bypass** -
+>   `m365.get_session_user` demands a signed cookie. To view the UI locally, start uvicorn with an
+>   explicit `SESSION_SECRET` (it is NOT in `backend/.env`, so it is ephemeral per-process otherwise) and
+>   mint `jwt.encode({'sub': <user_id>, 'exp': ...}, SECRET, 'HS256')` into the `starbot_session` cookie.
+
+> **Follow-up same day (2026-08-20) - Accounts table reshaped, N+1 fixed, rep casing normalized, dump deleted.**
+> - **Accounts spreadsheet columns are now: Account | Rep | Phone | Props | Units | Status | Updated.**
+>   Dropped **Contact** (the import brought almost no contacts, so the column was ~96% "—" and the one
+>   populated row made the whole table look lopsided - Ethan) and dropped **Website** (a
+>   click-to-research action, not a scan-and-decide datum). Both still live on the DETAIL view, which is
+>   where contacts/emails/notes belong: "keep the contact names and emails within the account itself, as
+>   in you would click on it to see the notes and what people are there" (Ethan). Added **Props**
+>   (`numProperties`) as a sortable numeric column immediately BEFORE Units, matching the old hit list's
+>   layout. `colSpan` 8->7, table `minWidth` 820->760, and the numeric sort branch now serves both keys
+>   (`sort.key === "props" ? a.numProperties : a.totalUnits`) with nulls always last.
+> - **PERF BUG FOUND + FIXED: `/api/accounts` was taking 29 SECONDS.** Classic N+1 - `list_accounts` did
+>   a bare `db.query(Account).all()` and `serialize()` then touched `a.contacts` and `a.interactions` on
+>   every row, so 120 accounts = **241 queries**. Invisible during the 5-row pilot (11 queries), brutal
+>   the moment the real hit list landed. Fix: `.options(selectinload(Account.contacts),
+>   selectinload(Account.interactions))` -> **3 queries flat, 29.3s -> 1.0s** measured off-Azure, byte-for-byte
+>   identical payload (47,121 bytes). Same treatment applied pre-emptively to `projects.py`
+>   (`selectinload(Project.interactions)`). **Lesson: any list endpoint whose serialize() walks a
+>   relationship needs eager loading before its table grows.** Note the 29s was measured from a LOCAL
+>   client to Azure Postgres (~120ms/round-trip); from inside the container (same region) the same N+1
+>   would have been ~1s - slow but easy to miss, which is exactly why it survived.
+> - **Rep casing normalized (cosmetic only).** `leighann` -> `Leighann` on Trilogy Real Estate Management
+>   (1 row). **CORRECTION to the note above: this was NEVER breaking the "My accounts" filter.**
+>   `repTokens()` already lowercases both sides and `firstNameOf()` lowercases the signed-in name, so
+>   `leighann`, `Leighann`, `Rudy/Leighann` and `Salam/Leighann` all matched already - verified by
+>   replaying the exact filter logic. The fix is display consistency in the Rep column, nothing more.
+>   Script normalizes each token to the most COMMON capitalization across all accounts (so it self-heals
+>   future imports) and preserves `/ , &` separators; it deliberately does NOT touch
+>   `updated_at`/`updated_by`, since a data tidy shouldn't overwrite who really last touched the row.
+>   `RJ Coons` left alone - a real pilot edit, not a typo.
+> - **`star_crm.dump` DELETED** from the repo root (123 KB, untracked, `PGDMP` custom-format). Safe: the
+>   migration was verified table-by-table and the rollback path is **Neon** (kept until ~2026-08-26), not
+>   this file. Confirmed the live DB healthy first - 14 tables / **1,444 rows** (was 1,304 at migration;
+>   +115 accounts + new events accounts for the delta), `accounts` = 120, `projects` /
+>   `project_interactions` = 0. **A second copy still sits at `C:\\Users\\ethan\\star_crm.dump` (114 KB) -
+>   NOT touched, outside the project; delete at will.**
+
+> - **Contact badge added to the Accounts table (2026-08-20).** With contacts moved to the detail view,
+>   the list had no signal for which accounts actually have a person on file - so the name cell now
+>   carries a small avatar chip (`UserRound` glyph in a SEA-tinted pill) whenever `contacts.length > 0`,
+>   showing the COUNT only when there is more than one, plus a `title` tooltip listing "Name - Role" per
+>   contact. Verified against the real 120 rows: exactly 1 badge (R.A. Snyder, shows "2", tooltip
+>   "Belinda Torres - AP / Billing" + "S. Mojica - Coordinator").
+> - **Local-dev gotcha #3: CHECK WHETHER A DEV SERVER IS ALREADY RUNNING BEFORE YOU START ONE.** Ethan
+>   often has his own `uvicorn` + `vite` up with a browser tab open on localhost to watch changes live.
+>   If you start uvicorn on top of that, yours silently dies with `WinError 10048` while HIS keeps
+>   serving, and every symptom points the wrong way: `/api/health` returns ok (his process), the log says
+>   "Application startup complete" (yours, just before it exits), and your freshly-set `SESSION_SECRET`
+>   appears to be ignored so auth 401s forever. Worse, his server also logs "SESSION_SECRET not set"
+>   (it is not in `backend/.env`), so the log cannot tell you whose process you are looking at. **Do this
+>   first:** `netstat -ano | findstr ":8000 "` and ASK before killing anything - do not assume a listener
+>   on 8000/5173 is yours. (Learned the hard way 2026-08-20: several rounds of confusion, and Claude
+>   force-killed Ethan's dev servers and broke his open browser tab.)
+> - **Secondary complication, real but not the headline: a socket can outlive the process that created
+>   it.** On Windows a child process inherits open handles, sockets included, and the kernel keeps the
+>   socket alive while ANY handle remains. So `taskkill /PID <uvicorn>` can report success while
+>   `netstat` still shows that now-dead PID LISTENING - netstat attributes a socket to its CREATOR, not
+>   to whoever currently holds a handle. Here uvicorn 21420 had a `multiprocessing.spawn ...
+>   parent_pid=21420` child (34912) holding the inherited socket; killing 21420 did nothing, killing
+>   34912 freed the port instantly. Find it with PowerShell
+>   `Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Select ProcessId,CommandLine` and look
+>   for the `--multiprocessing-fork` child whose parent_pid is the dead PID. (Which dependency spawns
+>   that worker was never traced; the child ran the GLOBAL python, consistent with multiprocessing using
+>   `sys._base_executable` from inside a venv.)
+> - **Two smaller traps from the same session:** (a) grepping the log for `10048` ~8s after launch
+>   returns 0 because the error has not flushed yet - wait ~12s before trusting a clean grep; an early
+>   clean grep is NOT evidence of a successful bind. (b) `/api/health` only proves SOMETHING is
+>   listening, not that it is your build - verify identity instead, e.g. hit a route that only exists in
+>   the new code, or notice (as happened here) that auth failing with a secret you know is correct is the
+>   old process telling you it is old.
+
+> - **Also worth knowing for shell work in this repo:** patching files via `python -c "..."` inside Bash
+>   breaks on BACKTICKS (bash does command substitution inside double quotes) and on long heredocs
+>   (`ENAMETOOLONG` on spawn). Write the replacement text to a scratchpad file first, then splice it with
+>   a short python script that reads that file - that path is reliable for both markdown notes and JSX.
+
+> **Resume note (2026-08-19) - DB migrated Neon -> Azure Postgres; prod now on Azure, Neon kept as rollback.**
+> - **Migration DONE.** Prod DB is now **Azure Database for PostgreSQL Flexible Server** `star-crm-pg` (PG **18.4**, Burstable **B1ms**, 32 GiB Premium SSD, westus3, RG `starbot`, ~**$16.09/mo** - HA OFF keeps it there; that's the real portal price, under the old $20.48 estimate). FQDN `star-crm-pg.postgres.database.azure.com`, db `star_crm`, admin `staradmin`. Firewall: allow-Azure-services (0.0.0.0) + Ethan's client IP.
+> - **How:** `pg_dump -Fc --no-owner --no-privileges` from Neon's **DIRECT** host (drop `-pooler`; the pooled endpoint is PgBouncer and breaks pg_dump) via the `postgres:18` Docker image -> `pg_restore` into `star_crm`. Verified **all 11 tables exact parity** vs live Neon (1,304 rows incl. events 724). Client tools MUST be PG 18 to match the server - the Docker image guarantees that.
+> - **Cutover:** swapped the container secret **`database-url`** to `postgresql+psycopg://staradmin:***@star-crm-pg.postgres.database.azure.com:5432/star_crm?sslmode=require`, then `az containerapp update --revision-suffix azuredb` to roll a new revision (secret changes are inert until a revision restarts). App boots clean on Azure (rev `starbot--azuredb`). `DATABASE_URL` env is a `secretref:database-url` pointer, so NO env change was needed - only the secret value + a fresh revision.
+> - **Neon KEPT as rollback until ~2026-08-26.** Do NOT delete before then. Rollback = set `database-url` back to the Neon string + roll a revision. Local `backend/.env` `DATABASE_URL` also repointed to Azure (still LIVE prod - ethan profile only, never Bob).
+> - **Gotchas (reconfirmed this run):** `pg_dump`/`pg_restore` binary output via PowerShell `>` gets UTF-16-corrupted - use WSL `>` or `pg_dump -f`. WSL "permission denied on docker.sock" = user not in the `docker` group (`sudo usermod -aG docker $USER` + reopen the shell). `az containerapp update` ECHOES empty scale-rule metadata (serialization artifact); `az containerapp show` confirms it persisted.
+
+> **Resume note (2026-08-11) - cold-start fixed via native KEDA cron scale rule; CRM double-submit bug fixed + Bob's duplicate contacts cleaned.**
+> - **Cold start (the "30s-3min to wake on first tab" annoyance) SOLVED with an Azure-native KEDA `cron` scale rule - NOT the cron-job.org external pinger the 2026-07-21 note planned.** A `cron` scale rule holds ONE replica warm during work hours; off-hours + weekends it still scales to zero (`minReplicas` stays 0). No external dependency, no request-log noise. Live on rev **starbot--0000043** (scale-config only, no image change). Rule `business-hours`: `timezone=America/Los_Angeles`, `start=30 7 * * 1-5` (7:30am Mon-Fri), `end=30 15 * * 1-5` (3:30pm), `desiredReplicas=1`; `maxReplicas=10`. Verified 1 warm replica at 10:13am PT.
+> - **Cost ~$1-3/mo** (0.5 vCPU / 1 GiB, ~173 warm-hrs/mo, mostly inside Azure's free monthly compute grant) vs ~$11-15 for always-on `minReplicas=1`. The wake itself is pure Azure platform (schedule replica + image PULL + Python import of anthropic/mcp/pillow/openpyxl); the app's own uvicorn startup is ~0.2s and the DB is NOT involved. Lazy-importing the heavy libs would only trim the import slice - PARKED (off-hours cold starts rarely matter now the workday is warm).
+> - **Apply/CLI:** `az containerapp update -n starbot -g starbot --min-replicas 0 --max-replicas 10 --scale-rule-name business-hours --scale-rule-type cron --scale-rule-metadata "timezone=America/Los_Angeles" "start=30 7 * * 1-5" "end=30 15 * * 1-5" "desiredReplicas=1"`. Portal: Container App -> Scaling -> add rule -> Custom -> type `cron`. **Gotcha:** the `update` command's ECHOED JSON shows EMPTY rule metadata (a serialization quirk of reading the mutation's return object); `az containerapp show` confirms the values persisted fine. Verify the resource, not the command echo.
+> - **CRM double-submit bug FIXED (revs 40->42):** the "Save contact" button had no in-flight guard, so on a slow POST an impatient re-click fired `createContact` again (backend has no dedup) -> N identical rows. Root cause of Bob's dupes (every exact-dup group was created within a 1-3s span). Fix: a `busy` state in `ContactForm` (`frontend/src/App.jsx`) that `await`s the save and disables the button, mirroring the Accounts/Mileage forms.
+> - **Bob's duplicate contacts CLEANED (66 -> 42):** backed up first (`Downloads/PersonalCRM/bob-contacts-backup-<ts>.json`, 66 contacts + 29 interactions), then Pass 1 deleted 20 exact-dup extras (keep oldest; zero interactions attached, pure deletes) -> 46, then Pass 2 merged 3 non-exact clusters (Mitch Stewart/Shaw 4->1; Jimmy Martinez + Brent Randle: kept the June rows that carry notes, set email -> firstname.lastname@sharp.com and category -> healthcare, dropped the Aug re-adds) -> 42. Only Bob was affected (Salam 10, Ethan 5, LeighAnn 1 had none).
+
+> **Resume note (2026-08-11) — Tasks tab rebuilt as the live "your day" aggregator.**
+> - **What it is:** the Tasks tab (`#tasks`) is no longer the kanban — it's a READ-ONLY aggregator
+>   of the signed-in user's own M365 + CRM data (the Jul-30 design/mock, built for real). Three lanes
+>   + a full-width manual list, and NOTHING writes to M365. NO new Graph scopes (existing Mail.Read +
+>   Calendars.Read cover it); no admin consent.
+> - **Lanes:** **Today's meetings** (calendar via `graph.list_calendar_events`, today→+6 days in
+>   Pacific; frontend groups upcoming / "Earlier today" / "Coming up this week"). **Replies needed** =
+>   Outlook FLAGGED emails (`graph.list_flagged_messages`, `$filter=flag/flagStatus eq 'flagged'`);
+>   read-only — each row is "Open in Outlook" (webLink), NO checkbox; reply+unflag in Outlook → drops
+>   off next Refresh; an **X dismiss** is persisted per-user (`dismissed_emails` table) so it stays
+>   gone even if the flag remains. **People to follow up** = CRM `next_action`/`next_due` on the
+>   SESSION user's own contacts; check = complete (logs a "Done:" touch on the contact + clears the
+>   action, session-scoped so it never hits the X-User-Id profile).
+> - **Manual "Your tasks"** = the existing `todos` table (the bot's add_todo still lands here), now a
+>   FULL-WIDTH section UNDER the lanes (2-col grid), not a side rail. Safety nets (Ethan: "done tasks
+>   were dropping into nothing"): checking a task moves it to a collapsible **Completed (N)** tray
+>   (reopen by clicking it, or Clear completed); deleting pops a 6s **Undo** toast that re-creates it.
+>   NO in-progress column.
+> - **Backend:** new `backend/tasks.py` router — `GET /api/tasks/agenda` (per-lane Graph failures
+>   degrade to an empty lane, not a 500), `POST /api/tasks/dismiss`, `POST /api/tasks/followup/{id}/
+>   complete`. `DismissedEmail` model + unique index `ix_dismissed_user_msg`. `graph.list_flagged_
+>   messages` added (no `$orderby` alongside the filter — sorts client-side). Frontend: `Tasks.jsx`
+>   fully rewritten; Refresh button + "Updated HH:MM"; header eyebrow "Task board" → **"Your day"**.
+> - **Deployed:** revs **41→42** (images tasks-aggregator / tasks-layout); live = `starbot--0000042`.
+>   Ethan confirmed connectors work + calendar syncs instantly. **UNCOMMITTED as of this note** (revs
+>   41-42 not yet in git; last push was `d3eaf08`).
+> - **DNS incident (2026-08-11):** the custom domain intermittently NXDOMAIN'd "on cold starts." Root
+>   cause = the whole `starflooringandremodeling.com` zone SERVFAILing at its nameservers
+>   `ns1/ns2.securedservers.info` (DataNet/Greenman) — confirmed via 8.8.8.8 + 1.1.1.1 failing for the
+>   zone AND `www` (company website down too), while Azure DNS + our hostname binding stayed fine. NOT
+>   us, NOT Azure, NOT the container cold-start (that's a slow load, never NXDOMAIN); the "cold start"
+>   tie is just the client's DNS cache expiring and re-querying the flaky NS. GoDaddy is only the
+>   REGISTRAR (green = registration OK); DNS is hosted at securedservers.info. Recovered on its own
+>   (2nd occurrence; 1st was 2026-07-09). **Do NOT reactively switch NS or use GoDaddy forwarding**
+>   (would drop MX/email + records that live on securedservers.info). Durable fix = move the zone's
+>   DNS to Cloudflare/Azure DNS (export records first, then switch NS at GoDaddy). Optional app-side
+>   resilience: make the OAuth redirect follow the request host so the azurecontainerapps.io URL is a
+>   real signed-in fallback (today `m365.REDIRECT_URI` is pinned to `PUBLIC_BASE_URL` = custom domain).
+
+> **Resume note (2026-08-04) — shared Accounts tab (the "hit list") shipped as a pilot.**
 > - **What it is:** a 5th tab, **Accounts** (`#accounts`, `frontend/src/Accounts.jsx` +
 >   `backend/accounts.py`), a COMPANY-WIDE shared sales prospecting list — every signed-in user
 >   sees + edits every account (session-cookie auth, NOT user-scoped). Distinct from the personal
@@ -438,7 +640,7 @@ This file is the single source of truth for picking the project back up. Read it
 - **Frontend:** React + Vite + Tailwind. Single-page UI in `frontend/src/App.jsx`,
   API client in `frontend/src/api.js`. No router — views are state-driven.
 - **Backend:** FastAPI + SQLAlchemy 2 + psycopg v3. **PostgreSQL only** (no SQLite).
-- **DB:** Neon (managed Postgres) in production; Docker Postgres locally
+- **DB:** **Azure Database for PostgreSQL Flexible Server** (`star-crm-pg`, PG 18) in production as of 2026-08-19 (migrated off Neon; Neon kept as rollback until ~2026-08-26). Docker Postgres locally
   (`docker-compose.yml`). Standard Postgres — no vendor lock-in on the data layer.
 - **Hosting:** **Azure Container Apps** is production (app `starbot`, RG `starbot`,
   westus3; one container serves API + built frontend — root `Dockerfile`, multi-stage:

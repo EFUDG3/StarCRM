@@ -29,6 +29,8 @@ import chat
 import m365
 import mileage
 import models  # noqa: F401 (ensures models are registered on Base)
+import projects
+import tasks
 import telemetry
 from database import Base, engine, get_db
 from models import Contact, Interaction, User
@@ -83,6 +85,12 @@ def _ensure_schema() -> None:
         conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_place_visits_user_place_date "
             "ON place_visits (user_id, place_id, date)"
+        ))
+        # Tasks tab: one dismissal per user+flagged-email; the unique index keeps
+        # a double-dismiss idempotent.
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_dismissed_user_msg "
+            "ON dismissed_emails (user_id, message_id)"
         ))
 
 
@@ -315,6 +323,8 @@ def usage_stats(
 app.include_router(m365.router)
 app.include_router(mileage.router)
 app.include_router(accounts.router)
+app.include_router(projects.router)
+app.include_router(tasks.router)
 
 
 @app.post("/api/chat")

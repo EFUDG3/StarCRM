@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Search, Phone, Mail, X, Check, Clock, Pencil, Trash2, ChevronLeft, RotateCcw,
-  UserCircle, ChevronDown, UserPlus, Camera, Sparkles, LayoutGrid, ListTodo, Car, Building2,
+  UserCircle, ChevronDown, UserPlus, Camera, Sparkles, LayoutGrid, ListTodo, Car, Building2, HardHat,
 } from "lucide-react";
 import * as api from "./api.js";
 import StarbotChat from "./Chat.jsx";
 import TaskBoard from "./Tasks.jsx";
 import MileageTracker from "./Mileage.jsx";
 import AccountsBoard from "./Accounts.jsx";
+import ProjectsBoard from "./Projects.jsx";
 
 // ---------- Brand tokens ----------
 // Star brand: red #922525, black, white, with warm supporting neutrals.
@@ -63,6 +64,7 @@ export default function StarCRM() {
       : window.location.hash === "#tasks" ? "tasks"
       : window.location.hash === "#mileage" ? "mileage"
       : window.location.hash === "#accounts" ? "accounts"
+      : window.location.hash === "#projects" ? "projects"
       : "board"
   );
   // Company gate: the whole app requires a Microsoft sign-in (me.signedIn).
@@ -331,7 +333,7 @@ export default function StarCRM() {
     setView(v);
     // Keep the hash in sync (deep link + where the sign-in redirect lands)
     // without pushing history entries that would fight the Back-button logic.
-    const hash = v === "chat" ? "#starbot" : v === "tasks" ? "#tasks" : v === "mileage" ? "#mileage" : v === "accounts" ? "#accounts" : window.location.pathname;
+    const hash = v === "chat" ? "#starbot" : v === "tasks" ? "#tasks" : v === "mileage" ? "#mileage" : v === "accounts" ? "#accounts" : v === "projects" ? "#projects" : window.location.pathname;
     window.history.replaceState(null, "", hash);
   };
 
@@ -400,10 +402,10 @@ export default function StarCRM() {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="font-mono text-xs tracking-[0.25em] uppercase mb-1 whitespace-nowrap" style={{ color: SEA }}>
-                {view === "chat" ? "AI assistant" : view === "tasks" ? "Task board" : view === "mileage" ? "Mileage tracker" : view === "accounts" ? "Shared hit list" : "Relationships"}
+                {view === "chat" ? "AI assistant" : view === "tasks" ? "Your day" : view === "mileage" ? "Mileage tracker" : view === "accounts" ? "Shared hit list" : view === "projects" ? "Commercial jobs" : "Relationships"}
               </div>
               <h1 className="text-3xl font-bold tracking-tight whitespace-nowrap" style={{ fontFamily: "Georgia, serif" }}>
-                <span style={{ color: SEA }}>★</span> {view === "chat" ? "Starbot" : view === "tasks" ? "Star Tasks" : view === "mileage" ? "Star Mileage" : view === "accounts" ? "Star Accounts" : "Star CRM"}
+                <span style={{ color: SEA }}>★</span> {view === "chat" ? "Starbot" : view === "tasks" ? "Star Tasks" : view === "mileage" ? "Star Mileage" : view === "accounts" ? "Star Accounts" : view === "projects" ? "Star Projects" : "Star CRM"}
               </h1>
             </div>
             {view === "board" && (
@@ -453,6 +455,9 @@ export default function StarCRM() {
               <button onClick={() => switchView("accounts")} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap" style={view === "accounts" ? { background: INK, color: "white" } : { background: "white", color: INK }}>
                 <Building2 size={14} /> Accounts
               </button>
+              <button onClick={() => switchView("projects")} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap" style={view === "projects" ? { background: INK, color: "white" } : { background: "white", color: INK }}>
+                <HardHat size={14} /> Projects
+              </button>
             </div>
             {view === "board" && (
               <UserSwitcher
@@ -478,6 +483,9 @@ export default function StarCRM() {
 
         {/* Accounts tab (shared hit list) */}
         {view === "accounts" && <AccountsBoard />}
+
+        {/* Projects tab (shared commercial job board) */}
+        {view === "projects" && <ProjectsBoard />}
 
         {/* Webcam card capture (opens from the Scan card button) */}
         {cameraOpen && (

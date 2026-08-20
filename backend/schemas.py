@@ -147,3 +147,51 @@ class AccountLogIn(BaseModel):
     the server if omitted."""
     note: str = Field(max_length=2000)
     date: Optional[str] = None
+
+
+class DismissIn(BaseModel):
+    """Dismiss a flagged email from the Tasks 'Replies needed' lane by its
+    Graph message id."""
+    id: str = Field(max_length=512)
+
+
+_STAGES = {"bidding", "awarded", "in_progress", "punch_list", "complete", "lost"}
+_PROJECT_TYPES = {"school", "restaurant", "retail", "multifamily", "office", "other"}
+
+
+class ProjectIn(BaseModel):
+    """A shared commercial project (PM board). Same cap philosophy as
+    AccountIn: length limits are enforced here so one oversized paste can't
+    bloat the shared table, and stage/type are coerced to known values so the
+    board never grows a phantom column."""
+    name: str = Field(max_length=200)
+    client: str = Field(default="", max_length=200)
+    siteAddress: str = Field(default="", max_length=300)
+    projectType: str = "other"
+    stage: str = "in_progress"
+    pm: str = Field(default="", max_length=120)
+    contractValue: Optional[float] = Field(default=None, ge=0)
+    startDate: str = Field(default="", max_length=20)   # ISO date, may be empty
+    targetDate: str = Field(default="", max_length=20)
+    material: str = Field(default="", max_length=120)
+    sqFt: Optional[int] = Field(default=None, ge=0)
+    description: str = Field(default="", max_length=5000)
+
+    @field_validator("stage")
+    @classmethod
+    def _valid_stage(cls, v: str) -> str:
+        v = (v or "in_progress").strip().lower()
+        return v if v in _STAGES else "in_progress"
+
+    @field_validator("projectType")
+    @classmethod
+    def _valid_type(cls, v: str) -> str:
+        v = (v or "other").strip().lower()
+        return v if v in _PROJECT_TYPES else "other"
+
+
+class ProjectLogIn(BaseModel):
+    """One dated activity-log note on a project. `date` defaults to today on
+    the server if omitted."""
+    note: str = Field(max_length=2000)
+    date: Optional[str] = None

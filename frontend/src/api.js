@@ -185,6 +185,13 @@ export const deleteAccount = (id) =>
 export const logAccountNote = (id, note) =>
   sessionRequest(`/api/accounts/${id}/log`, { method: "POST", body: JSON.stringify({ note }) });
 
+// --- Tasks tab aggregator (meetings + flagged replies + CRM follow-ups) ------
+export const taskAgenda = () => sessionRequest("/api/tasks/agenda");
+export const dismissReply = (id) =>
+  sessionRequest("/api/tasks/dismiss", { method: "POST", body: JSON.stringify({ id }) });
+export const completeFollowup = (contactId) =>
+  sessionRequest(`/api/tasks/followup/${contactId}/complete`, { method: "POST" });
+
 export const listTodos = (includeDone = false) =>
   sessionRequest(`/api/todos${includeDone ? "?include_done=true" : ""}`);
 export const addTodo = (text, due = "", priority = "") =>
@@ -232,3 +239,14 @@ export const chatStream = async (messages, onEvent, signal) => {
     }
   }
 };
+
+// --- Projects (shared PM board — company-wide, session-cookie auth) ----------
+export const listProjects = () => sessionRequest("/api/projects");
+export const createProject = (data) =>
+  sessionRequest("/api/projects", { method: "POST", body: JSON.stringify(data) });
+export const updateProject = (id, data) =>
+  sessionRequest(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteProject = (id) =>
+  sessionRequest(`/api/projects/${id}`, { method: "DELETE" });
+export const logProjectNote = (id, note) =>
+  sessionRequest(`/api/projects/${id}/log`, { method: "POST", body: JSON.stringify({ note }) });

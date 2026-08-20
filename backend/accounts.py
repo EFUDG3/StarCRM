@@ -14,7 +14,7 @@ import json
 from datetime import date as date_cls, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 import m365
 import telemetry
@@ -123,8 +123,16 @@ def _apply(a: Account, payload: AccountIn, user: User) -> None:
 def list_accounts(
     _user: User = Depends(m365.get_session_user), db: Session = Depends(get_db)
 ) -> list:
-    """Every account, for everyone. Frontend does the ranking/filtering."""
-    rows = db.query(Account).all()
+    """Every account, for everyone. Frontend does the ranking/filtering.
+
+    Eager-loads contacts + interactions: serialize() touches both on every row,
+    so lazy loading meant 2 extra round-trips PER account (241 queries for 120
+    accounts, ~29s from off-Azure). selectinload makes it 3 queries flat."""
+    rows = (
+        db.query(Account)
+        .options(selectinload(Account.contacts), selectinload(Account.interactions))
+        .all()
+    )
     return [serialize(a) for a in rows]
 
 

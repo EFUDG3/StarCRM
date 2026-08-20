@@ -53,6 +53,10 @@ def _acct_interaction_id() -> str:
     return "ai" + uuid.uuid4().hex[:11]
 
 
+def _dismiss_id() -> str:
+    return "d" + uuid.uuid4().hex[:12]
+
+
 class User(Base):
     """A profile that owns its own set of contacts. No password — selecting a
     user is a client-side switch for now. When SSO lands, this table gains the
@@ -207,6 +211,21 @@ class PlaceVisit(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class DismissedEmail(Base):
+    """A flagged email a user dismissed from the Tasks 'Replies needed' lane, so
+    a refresh won't re-surface it even while the Outlook flag is still set.
+    `message_id` is the Graph message id. Per-user; cascade-deleted with the user."""
+
+    __tablename__ = "dismissed_emails"
+
+    id = Column(String, primary_key=True, default=_dismiss_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    message_id = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class Event(Base):
     """One usage-telemetry row: who did what, where, when. Written best-effort
     by telemetry.log_event (a failure there never breaks the feature being
@@ -323,3 +342,72 @@ class AccountInteraction(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     account = relationship("Account", back_populates="interactions")
+
+
+def _project_id() -> str:
+    return "pj" + uuid.uuid4().hex[:11]
+
+
+def _proj_interaction_id() -> str:
+    return "pi" + uuid.uuid4().hex[:11]
+
+
+class Project(Base):
+    """A large commercial construction job the PM team is running — schools,
+    restaurants, retail build-outs. Shared company-wide like Account (every
+    signed-in user sees and edits every project); `pm` marks who runs it, not
+    who can see it. Deliberately lean: this is the "am I on top of my jobs"
+    view for weekly meetings, NOT a full construction-PM system (Procore) and
+    NOT accounting (QuickBooks stays the book of record for money).
+
+    Distinct from Account: accounts are the SALES hit list (property management
+    companies), projects are the PM team's active construction work. No FK
+    between them — a school job comes through a GC, not a mgmt company.
+
+    `stage` drives the board grouping; "in_progress" is the default/main lane.
+    """
+
+    __tablename__ = "projects"
+
+    id = Column(String, primary_key=True, default=_project_id)
+    name = Column(String, nullable=False)             # job name, e.g. "Lincoln High gym floor"
+    client = Column(String, default="")               # GC / owner / school district (free text)
+    site_address = Column(String, default="")
+    project_type = Column(String, default="other")    # school|restaurant|retail|multifamily|office|other
+    stage = Column(String, nullable=False, default="in_progress")  # bidding|awarded|in_progress|punch_list|complete|lost
+    pm = Column(String, default="")                   # assigned project manager; "" = unassigned
+    contract_value = Column(Float, nullable=True)
+    start_date = Column(String, default="")           # ISO date string, may be empty
+    target_date = Column(String, default="")          # target substantial completion
+    material = Column(String, default="")             # LVP / carpet / tile / mixed
+    sq_ft = Column(Integer, nullable=True)
+    description = Column(Text, default="")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now())
+    updated_by = Column(String, default="")           # name of the last editor
+
+    interactions = relationship(
+        "ProjectInteraction",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+
+
+class ProjectInteraction(Base):
+    """A dated activity-log entry on a Project — the running job log (site
+    visit, material delivery, delay, inspection). Mirrors AccountInteraction:
+    records WHO logged it (`by`), since the whole PM team edits projects.
+    This is what makes the weekly meeting easy — the log IS the status."""
+
+    __tablename__ = "project_interactions"
+
+    id = Column(String, primary_key=True, default=_proj_interaction_id)
+    project_id = Column(
+        String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    date = Column(String, nullable=False)  # ISO date string
+    note = Column(Text, nullable=False)
+    by = Column(String, default="")        # name of the user who logged it
+    created_at = Column(DateTime, server_default=func.now())
+
+    project = relationship("Project", back_populates="interactions")

@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, Search, X, Trash2, ChevronLeft, Check, Building2, Globe, Phone,
-  Mail, UserPlus, ArrowUpDown, ExternalLink, Pencil,
+  Mail, UserPlus, ArrowUpDown, ExternalLink, Pencil, UserRound,
 } from "lucide-react";
 import * as api from "./api.js";
 
@@ -124,8 +124,9 @@ export default function Accounts() {
     out = [...out].sort((a, b) => {
       if (sort.key === "name") return a.name.localeCompare(b.name) * dir;
       if (sort.key === "updated") return ((a.updated || "") < (b.updated || "") ? -1 : 1) * dir;
-      // units: nulls always last regardless of direction
-      const av = a.totalUnits, bv = b.totalUnits;
+      // props/units: nulls always last regardless of direction
+      const av = sort.key === "props" ? a.numProperties : a.totalUnits;
+      const bv = sort.key === "props" ? b.numProperties : b.totalUnits;
       if (av == null && bv == null) return 0;
       if (av == null) return 1;
       if (bv == null) return -1;
@@ -257,19 +258,18 @@ export default function Accounts() {
 
       <div className="text-xs mb-2" style={{ color: "#8b9a9f" }}>
         {rows.length} account{rows.length === 1 ? "" : "s"}{view === "mine" ? " assigned to you" : view === "unassigned" ? " with no rep" : ""}
-        {" · "}{sort.key === "units" ? "ranked by units" : sort.key === "name" ? "sorted by name" : "sorted by last updated"}{sort.dir === "asc" ? " (asc)" : ""}
+        {" · "}{sort.key === "units" ? "ranked by units" : sort.key === "props" ? "ranked by properties" : sort.key === "name" ? "sorted by name" : "sorted by last updated"}{sort.dir === "asc" ? " (asc)" : ""}
       </div>
 
       {/* Table */}
       <div className="bg-white rounded-lg border overflow-x-auto" style={{ borderColor: BORDER }}>
-        <table className="w-full text-sm" style={{ minWidth: 820 }}>
+        <table className="w-full text-sm" style={{ minWidth: 760 }}>
           <thead>
             <tr style={{ borderBottom: "1px solid " + BORDER }}>
               <Th label="Account" k="name" />
               <th className="px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-left" style={{ color: "#6b7a80" }}>Rep</th>
-              <th className="px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-left" style={{ color: "#6b7a80" }}>Contact</th>
               <th className="px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-left" style={{ color: "#6b7a80" }}>Phone</th>
-              <th className="px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-left" style={{ color: "#6b7a80" }}>Website</th>
+              <Th label="Props" k="props" num />
               <Th label="Units" k="units" num />
               <th className="px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-left" style={{ color: "#6b7a80" }}>Status</th>
               <Th label="Updated" k="updated" />
@@ -278,12 +278,26 @@ export default function Accounts() {
           <tbody>
             {rows.map((a) => {
               const st = STATUS[a.status] || STATUS.prospect;
-              const primary = a.contacts?.[0];
-              const extra = (a.contacts?.length || 0) - 1;
               return (
                 <tr key={a.id} onClick={() => setViewing(a)} className="cursor-pointer hover:bg-stone-50" style={{ borderBottom: "1px solid " + ROW_LINE }}>
                   <td className="px-3 py-2.5 align-top">
-                    <div className="font-semibold break-words" style={{ color: INK, maxWidth: "18rem" }}>{a.name}</div>
+                    <div className="font-semibold break-words" style={{ color: INK, maxWidth: "18rem" }}>
+                      {a.name}
+                      {/* Contacts live on the detail view now, so the list needs
+                          SOME signal that an account has a person on file. Small
+                          avatar chip; count only when there's more than one.
+                          Hover lists the names + roles. */}
+                      {(a.contacts?.length || 0) > 0 && (
+                        <span
+                          title={a.contacts.map((c) => (c.role ? c.name + " — " + c.role : c.name)).join("\n")}
+                          className="inline-flex items-center gap-0.5 align-middle ml-1.5 rounded-full font-mono text-[9px] font-bold px-1 py-0.5"
+                          style={{ background: "rgba(146,37,37,.10)", color: SEA }}
+                        >
+                          <UserRound size={9} strokeWidth={2.75} />
+                          {a.contacts.length > 1 ? a.contacts.length : null}
+                        </span>
+                      )}
+                    </div>
                     {a.addresses?.[0] && <div className="text-xs truncate" style={{ color: "#8b9a9f", maxWidth: "18rem" }}>{a.addresses[0]}</div>}
                   </td>
                   <td className="px-3 py-2.5">
@@ -294,22 +308,9 @@ export default function Accounts() {
                       </span>
                     ) : <span className="text-xs" style={{ color: "#b0b8ba" }}>unassigned</span>}
                   </td>
-                  <td className="px-3 py-2.5">
-                    {primary ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className="text-[13px]">{primary.name}</span>
-                        {primary.email && <Mail size={12} style={{ color: SEA }} />}
-                        {extra > 0 && <span className="font-mono text-[10px] font-bold px-1.5 rounded-full" style={{ background: "rgba(146,37,37,.10)", color: SEA }}>+{extra}</span>}
-                      </span>
-                    ) : <span className="text-xs" style={{ color: "#b0b8ba" }}>—</span>}
-                  </td>
                   <td className="px-3 py-2.5 font-mono text-[12px] whitespace-nowrap" style={{ color: "#4a5a60" }}>{a.phone || "—"}</td>
-                  <td className="px-3 py-2.5">
-                    {a.website ? (
-                      <a href={a.website} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-[12px] underline" style={{ color: SEA }}>
-                        <Globe size={12} /> {hostOf(a.website)}
-                      </a>
-                    ) : <span className="text-xs" style={{ color: "#b0b8ba" }}>—</span>}
+                  <td className="px-3 py-2.5 text-right font-mono text-[13px] tabular-nums" style={{ color: "#4a5a60" }}>
+                    {a.numProperties != null ? a.numProperties.toLocaleString() : <span style={{ color: "#b0b8ba" }}>—</span>}
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono text-[13px] font-semibold tabular-nums" style={{ color: INK }}>
                     {a.totalUnits != null ? a.totalUnits.toLocaleString() : <span style={{ color: "#b0b8ba" }}>—</span>}
@@ -329,7 +330,7 @@ export default function Accounts() {
               );
             })}
             {rows.length === 0 && (
-              <tr><td colSpan={8} className="text-sm text-center py-10" style={{ color: "#8b9a9f" }}>No accounts match. Clear the search or add one.</td></tr>
+              <tr><td colSpan={7} className="text-sm text-center py-10" style={{ color: "#8b9a9f" }}>No accounts match. Clear the search or add one.</td></tr>
             )}
           </tbody>
         </table>

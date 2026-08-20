@@ -138,6 +138,25 @@ def list_recent_messages(token: str, top: int = 25, unread_only: bool = False) -
     return [_msg_summary(m) for m in data.get("value", [])]
 
 
+def list_flagged_messages(token: str, top: int = 40) -> list[dict]:
+    """Emails the user flagged for follow-up — the Tasks tab's 'Replies needed'
+    lane. Read-only: handling/clearing the flag happens in Outlook, and a
+    cleared flag drops off the next refresh. (No $orderby: Graph restricts
+    combining it with a filter on a different property, so we sort client-side.)"""
+    top = max(1, min(top, 50))
+    data = _request(
+        token, "GET", "/me/messages",
+        params={
+            "$select": _MSG_FIELDS,
+            "$top": top,
+            "$filter": "flag/flagStatus eq 'flagged'",
+        },
+    )
+    rows = [_msg_summary(m) for m in data.get("value", [])]
+    rows.sort(key=lambda r: r.get("received", ""), reverse=True)
+    return rows
+
+
 def get_message(token: str, message_id: str, max_chars: int = 8000) -> dict:
     """One message with its full body as plain text."""
     data = _request(
