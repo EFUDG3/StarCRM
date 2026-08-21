@@ -411,3 +411,92 @@ class ProjectInteraction(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     project = relationship("Project", back_populates="interactions")
+
+
+def _thread_id() -> str:
+    return "et" + uuid.uuid4().hex[:11]
+
+
+class EmailThread(Base):
+    """One triaged conversation in a user's mailbox — the Email tab's unit of
+    work. NO message bodies are stored, ever (that rule is what keeps this
+    table at ~1.2 KB/row instead of 5-20 KB): metadata, a 300-char snippet,
+    and the triage verdict. `messages_json` keeps a compact per-message trail
+    ({id, dir, from, at, toMe, ccMe}, capped at 30) so thread STATE can be
+    recomputed when a new message lands without refetching history from Graph.
+    Rows older than 90 days are pruned at sync time — the digest only cares
+    about recent mail, and anything with lasting value gets promoted to an
+    account note instead."""
+
+    __tablename__ = "email_threads"
+
+    id = Column(String, primary_key=True, default=_thread_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    conversation_id = Column(String, nullable=False, index=True)
+    subject = Column(String, default="")
+    sender_name = Column(String, default="")    # latest inbound sender
+    sender_email = Column(String, default="")
+    snippet = Column(String, default="")        # bodyPreview of latest inbound, capped
+    folder = Column(String, default="")         # display name where it sits
+    web_link = Column(String, default="")
+    messages_json = Column(Text, default="[]")  # compact per-message trail (no bodies)
+    last_message_id = Column(String, default="")  # triage cache key: retriage only when this changes
+    last_direction = Column(String, default="in")  # in | out
+    first_at = Column(String, default="")       # ISO datetime
+    last_at = Column(String, default="", index=True)
+    msg_count = Column(Integer, nullable=False, default=1)
+    is_flagged = Column(Boolean, nullable=False, default=False)
+    # Verdict
+    state = Column(String, nullable=False, default="needs_reply")
+    # needs_reply | waiting | fyi | resolved | bulk
+    rank = Column(Integer, nullable=False, default=50)   # 0-100 within-lane ordering
+    category = Column(String, default="")                # customer|vendor|internal|notification|other
+    reason = Column(String, default="")                  # one line: why it ranked here (auditable)
+    model_used = Column(Boolean, nullable=False, default=False)
+    account_id = Column(String, nullable=True)           # matched shared account (domain match)
+    account_name = Column(String, default="")
+    triaged_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class EmailSyncState(Base):
+    """Per-user Graph delta tokens + last-sync stamp. One row per user; the
+    deltaLink is what makes every sync after the first incremental."""
+
+    __tablename__ = "email_sync_state"
+
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    inbox_delta = Column(Text, default="")
+    sent_delta = Column(Text, default="")
+    last_sync = Column(DateTime, nullable=True)
+
+
+class UserPref(Base):
+    """Per-user feature preferences. Digest is OFF by default — it only ever
+    emails people who chose it (the Email tab's switch writes here; the phase-2
+    digest job reads it)."""
+
+    __tablename__ = "user_prefs"
+
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    digest_enabled = Column(Boolean, nullable=False, default=False)
+    digest_hour = Column(Integer, nullable=False, default=7)  # local (Pacific) send hour
+
+
+class GlossaryEntry(Base):
+    """Company vocabulary fed to the triage model — what lets a small model
+    know DataNet is our IT vendor and RollMaster is the ERP. Accuracy here is
+    a context problem, not a model-size problem. Seeded on first run; grows by
+    hand (direct DB edits for now)."""
+
+    __tablename__ = "glossary"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    term = Column(String, nullable=False)
+    meaning = Column(String, nullable=False)

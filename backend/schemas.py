@@ -195,3 +195,10 @@ class ProjectLogIn(BaseModel):
     the server if omitted."""
     note: str = Field(max_length=2000)
     date: Optional[str] = None
+
+
+class EmailPrefIn(BaseModel):
+    """Email tab preferences. Both fields optional so the switch can PUT just
+    the one it changed."""
+    digestEnabled: Optional[bool] = None
+    digestHour: Optional[int] = Field(default=None, ge=5, le=12)

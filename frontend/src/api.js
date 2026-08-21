@@ -250,3 +250,10 @@ export const deleteProject = (id) =>
   sessionRequest(`/api/projects/${id}`, { method: "DELETE" });
 export const logProjectNote = (id, note) =>
   sessionRequest(`/api/projects/${id}/log`, { method: "POST", body: JSON.stringify({ note }) });
+
+// --- Email triage (per-user inbox ranking — session-cookie auth) -------------
+export const emailOverview = () => sessionRequest("/api/email/overview");
+export const emailSync = () =>
+  sessionRequest("/api/email/sync", { method: "POST" });
+export const setEmailPrefs = (data) =>
+  sessionRequest("/api/email/prefs", { method: "PUT", body: JSON.stringify(data) });

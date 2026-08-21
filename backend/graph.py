@@ -275,3 +275,74 @@ def search_files(token: str, query: str, top: int = 10) -> list[dict]:
                     "sizeBytes": res.get("size"),
                 })
     return out
+
+
+# --- Email triage: delta sync + folder map -----------------------------------
+# The triage engine (email_triage.py) needs incremental mail sync. Graph's mail
+# delta is FOLDER-scoped (/me/mailFolders/{id}/messages/delta) — there is no
+# mailbox-wide delta — so the engine syncs inbox + sentitems and merges by
+# conversationId. Sent items are what make thread state possible at all ("you
+# spoke last" can't be seen from the inbox alone).
+
+_DELTA_FIELDS = ("id,conversationId,subject,from,toRecipients,ccRecipients,"
+                 "receivedDateTime,isRead,bodyPreview,parentFolderId,webLink,"
+                 "flag,importance")
+
+
+def delta_messages(token: str, folder: str, delta_link: str = "",
+                   since: str = "", max_pages: int = 20) -> tuple[list[dict], str]:
+    """One delta round for a mail folder ('inbox' / 'sentitems').
+
+    First call (no delta_link): initializes the delta, optionally bounded with
+    a receivedDateTime filter so the backfill window is finite. Later calls:
+    replay the stored deltaLink and get only what changed. Returns
+    (messages, new_delta_link). Pages via @odata.nextLink; `max_pages` caps a
+    pathological first sync. Items Graph reports as removed (deleted/moved out
+    of the folder) come back as {"id": ..., "removed": True}."""
+    if delta_link:
+        # deltaLink is a full URL; _request prefixes GRAPH, so strip it.
+        path = delta_link[len(GRAPH):] if delta_link.startswith(GRAPH) else delta_link
+        params = None
+    else:
+        path = f"/me/mailFolders/{folder}/messages/delta"
+        params = {"$select": _DELTA_FIELDS}
+        if since:
+            params["$filter"] = f"receivedDateTime ge {since}T00:00:00Z"
+    out: list[dict] = []
+    new_link = delta_link
+    # Delta pages default to 10 items; ask for 100 so a month of mail doesn't
+    # burn the page budget before the final deltaLink is reached.
+    hdrs = {"Prefer": "odata.maxpagesize=100"}
+    for _ in range(max_pages):
+        data = _request(token, "GET", path, params=params, headers=hdrs)
+        params = None  # nextLink/deltaLink carry their own query string
+        for m in data.get("value", []):
+            if "@removed" in m:
+                out.append({"id": m.get("id", ""), "removed": True})
+            else:
+                out.append(m)
+        nxt = data.get("@odata.nextLink")
+        if nxt:
+            path = nxt[len(GRAPH):] if nxt.startswith(GRAPH) else nxt
+            new_link = nxt  # resumable: if the page cap hits, continue here next sync
+            continue
+        new_link = data.get("@odata.deltaLink", new_link)
+        break
+    return out, new_link
+
+
+def list_mail_folders(token: str) -> dict[str, str]:
+    """Folder id -> display name, one level of children included. The triage
+    engine uses this to label where a message was filed — staff organize by
+    folder, so the folder name is a real ranking signal."""
+    data = _request(
+        token, "GET", "/me/mailFolders",
+        params={"$top": 100, "$select": "id,displayName",
+                "$expand": "childFolders($select=id,displayName;$top=50)"},
+    )
+    out: dict[str, str] = {}
+    for f in data.get("value", []):
+        out[f.get("id", "")] = f.get("displayName", "")
+        for c in f.get("childFolders", []) or []:
+            out[c.get("id", "")] = f"{f.get('displayName', '')}/{c.get('displayName', '')}"
+    return out

@@ -26,6 +26,7 @@ import accounts
 import auth
 import cards
 import chat
+import email_triage
 import m365
 import mileage
 import models  # noqa: F401 (ensures models are registered on Base)
@@ -296,6 +297,8 @@ def _seed_on_first_run() -> None:
         # Shared accounts seed their own 5 pilot rows (independent of users —
         # self-guards on an empty accounts table, so it runs once).
         accounts.seed_accounts(db)
+        # Triage glossary (email_triage) seeds itself the same way.
+        email_triage.seed_glossary(db)
     finally:
         db.close()
 
@@ -324,6 +327,7 @@ app.include_router(m365.router)
 app.include_router(mileage.router)
 app.include_router(accounts.router)
 app.include_router(projects.router)
+app.include_router(email_triage.router)
 app.include_router(tasks.router)
 
 

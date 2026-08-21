@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Search, Phone, Mail, X, Check, Clock, Pencil, Trash2, ChevronLeft, RotateCcw,
-  UserCircle, ChevronDown, UserPlus, Camera, Sparkles, LayoutGrid, ListTodo, Car, Building2, HardHat,
+  UserCircle, ChevronDown, UserPlus, Camera, Sparkles, LayoutGrid, ListTodo, Car, Building2, HardHat, Inbox,
 } from "lucide-react";
 import * as api from "./api.js";
 import StarbotChat from "./Chat.jsx";
@@ -9,6 +9,7 @@ import TaskBoard from "./Tasks.jsx";
 import MileageTracker from "./Mileage.jsx";
 import AccountsBoard from "./Accounts.jsx";
 import ProjectsBoard from "./Projects.jsx";
+import EmailTab from "./Email.jsx";
 
 // ---------- Brand tokens ----------
 // Star brand: red #922525, black, white, with warm supporting neutrals.
@@ -65,6 +66,7 @@ export default function StarCRM() {
       : window.location.hash === "#mileage" ? "mileage"
       : window.location.hash === "#accounts" ? "accounts"
       : window.location.hash === "#projects" ? "projects"
+      : window.location.hash === "#email" ? "email"
       : "board"
   );
   // Company gate: the whole app requires a Microsoft sign-in (me.signedIn).
@@ -333,7 +335,7 @@ export default function StarCRM() {
     setView(v);
     // Keep the hash in sync (deep link + where the sign-in redirect lands)
     // without pushing history entries that would fight the Back-button logic.
-    const hash = v === "chat" ? "#starbot" : v === "tasks" ? "#tasks" : v === "mileage" ? "#mileage" : v === "accounts" ? "#accounts" : v === "projects" ? "#projects" : window.location.pathname;
+    const hash = v === "chat" ? "#starbot" : v === "tasks" ? "#tasks" : v === "mileage" ? "#mileage" : v === "accounts" ? "#accounts" : v === "projects" ? "#projects" : v === "email" ? "#email" : window.location.pathname;
     window.history.replaceState(null, "", hash);
   };
 
@@ -402,10 +404,10 @@ export default function StarCRM() {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="font-mono text-xs tracking-[0.25em] uppercase mb-1 whitespace-nowrap" style={{ color: SEA }}>
-                {view === "chat" ? "AI assistant" : view === "tasks" ? "Your day" : view === "mileage" ? "Mileage tracker" : view === "accounts" ? "Shared hit list" : view === "projects" ? "Commercial jobs" : "Relationships"}
+                {view === "chat" ? "AI assistant" : view === "tasks" ? "Your day" : view === "mileage" ? "Mileage tracker" : view === "accounts" ? "Shared hit list" : view === "projects" ? "Commercial jobs" : view === "email" ? "Inbox triage" : "Relationships"}
               </div>
               <h1 className="text-3xl font-bold tracking-tight whitespace-nowrap" style={{ fontFamily: "Georgia, serif" }}>
-                <span style={{ color: SEA }}>★</span> {view === "chat" ? "Starbot" : view === "tasks" ? "Star Tasks" : view === "mileage" ? "Star Mileage" : view === "accounts" ? "Star Accounts" : view === "projects" ? "Star Projects" : "Star CRM"}
+                <span style={{ color: SEA }}>★</span> {view === "chat" ? "Starbot" : view === "tasks" ? "Star Tasks" : view === "mileage" ? "Star Mileage" : view === "accounts" ? "Star Accounts" : view === "projects" ? "Star Projects" : view === "email" ? "Star Mail" : "Star CRM"}
               </h1>
             </div>
             {view === "board" && (
@@ -445,6 +447,9 @@ export default function StarCRM() {
               </button>
               <button onClick={() => switchView("tasks")} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap" style={view === "tasks" ? { background: INK, color: "white" } : { background: "white", color: INK }}>
                 <ListTodo size={14} /> Tasks
+              </button>
+              <button onClick={() => switchView("email")} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap" style={view === "email" ? { background: INK, color: "white" } : { background: "white", color: INK }}>
+                <Inbox size={14} /> Email
               </button>
               <button onClick={() => switchView("mileage")} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap" style={view === "mileage" ? { background: INK, color: "white" } : { background: "white", color: INK }}>
                 <Car size={14} /> Mileage
@@ -486,6 +491,9 @@ export default function StarCRM() {
 
         {/* Projects tab (shared commercial job board) */}
         {view === "projects" && <ProjectsBoard />}
+
+        {/* Email tab (per-user inbox triage) */}
+        {view === "email" && <EmailTab />}
 
         {/* Webcam card capture (opens from the Scan card button) */}
         {cameraOpen && (

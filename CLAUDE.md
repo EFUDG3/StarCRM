@@ -24,7 +24,59 @@ This file is the single source of truth for picking the project back up. Read it
 > (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
 > + Rate columns; own calendar only.
 
-> **Resume note (2026-08-20, LATEST) - Hit List II imported into Accounts (120 rows); Projects tab BUILT + SHIPPED (rev starbot--projects).**
+> **Resume note (2026-08-21, LATEST) - EMAIL TRIAGE PHASE 1 BUILT + validated on real mail. Not committed/deployed.**
+> - **What it is:** a new **Email tab** (`#email`, "Star Mail", Inbox icon, sits after Tasks) that ranks
+>   the signed-in user's inbox at THREAD level into four lanes - Needs your reply / Waiting on them /
+>   Worth knowing / Cleanup candidates - with the REASON each thread ranked shown on the row (the
+>   audit line is the trust mechanism). **Resolved threads are deliberately absent** ("N resolved
+>   themselves - not shown"): their absence IS the feature. Full build plan lives at the artifact
+>   https://claude.ai/code/artifact/8d749a77-ab0e-4778-b31b-eba87433452c (5 phases; this is phase 1).
+>   Runs entirely on existing Mail.Read - nothing sent, written back, or deleted.
+> - **Files:** `backend/email_triage.py` (engine + router `/api/email/{overview,sync,prefs}`),
+>   delta helpers in `graph.py` (`delta_messages`, `list_mail_folders`), 4 new tables in models.py
+>   (`email_threads`, `email_sync_state`, `user_prefs`, `glossary` - created additively, ALREADY exist
+>   in prod), `EmailPrefIn` in schemas.py, `frontend/src/Email.jsx`, api.js helpers, App.jsx wiring
+>   (8 spots). Glossary seeds 9 entries via `_seed_on_first_run` (DataNet=IT vendor, RollMaster=ERP...).
+> - **Pipeline (cost order):** Graph delta on inbox+sentitems (SENT ITEMS ARE REQUIRED - "you spoke
+>   last" is invisible from the inbox alone) -> mechanical bulk filter (no-reply senders, unsubscribe
+>   copy, notification-style subjects; rules, never a model) -> thread state from conversationId shape
+>   -> deterministic scoring (To-vs-Cc, flagged, hit-list domain match, internal, age) -> Haiku
+>   (`TRIAGE_MODEL`, default claude-haiku-4-5) batched x15, metadata only + glossary, ONLY on the
+>   ambiguous remainder -> verdict stored once, keyed by last_message_id. 90-day retention prunes at
+>   sync. NO BODIES STORED EVER (~1.2KB/row). `EMAIL_BACKFILL_DAYS` env, default 30.
+> - **Measured on Ethan's real mailbox:** 330 msgs/30d -> 169 threads -> ~28 needs_reply / 29 waiting /
+>   ~55 fyi / 34 bulk / 15+ resolved; ~60-70 model verdicts on backfill (~1-2 cents). First sync ~80s;
+>   incremental sync = `0 changed` in ~19s. THE DataNet acceptance case passes: closed tickets ->
+>   resolved, informational ticket updates -> fyi, ticket updates with a real question -> needs_reply
+>   at modest rank. All cold marketing (Abacus/Verisk/Superhuman/Neon) -> fyi with blunt reasons.
+> - **Triage rules that took real tuning (don't relearn these):** (1) toMe alone is NOT a strong
+>   signal - that's how LinkedIn codes topped the lane; it needs a second human signal (named/asks/
+>   account/internal/flagged). (2) ROBOT senders (support@|no-reply|contact@|sales@|"assistant"...)
+>   defeat name/question signals -> model judges. (3) COLD first contact (msg_count==1, unknown
+>   external domain, not flagged) -> model, never straight to the lane - that's where marketing lives.
+>   (4) "Got it, thanks!" ack as last inbound (short, no '?', msg_count>1) -> resolved fast-path.
+>   (5) They-replied-to-you-with-a-STATEMENT (answered your ask, no question back) -> model with the
+>   hint "check if anything is still asked of you" - Olga's "that will be enough ;)" case. (6) Signals
+>   must read the FRESH part of bodyPreview (`_fresh()` splits at ______/From:/On...wrote:) - quoted
+>   history contains stale '?'s and the snippet displayed is the fresh part too. (7) Colleague-replied
+>   settles a thread ONLY when user was Cc; on To or named -> model ("does their reply cover me?").
+> - **Model-batch gotcha that bit:** 25 verdicts x max_tokens=1500 = truncated JSON = parse fail =
+>   whole batch "(model unavailable)". Now batch=15, max_tokens=4000, reasons capped at 12 words,
+>   fail-open rank clamped to 45 so junk never crowns the lane. Fail-open = needs_reply (never drop
+>   mail silently).
+> - **UI details:** first visit auto-runs the backfill with an honest "takes about a minute" banner;
+>   digest toggle (writes user_prefs.digest_enabled, default OFF, labeled "coming soon" - phase 2
+>   honors it); lanes collapsible w/ localStorage (`starEmailCollapsed`); rows open in Outlook via
+>   webLink (this tab is NOT a mail client); account-matched threads show a hit-list chip; [sparkles]
+>   icon = model-judged. Cleanup lane is read-only until Mail.ReadWrite (phase 3).
+> - **NOT DONE:** not committed, not deployed (Ethan pushes; deploy = acr build + containerapp update).
+>   Phase 2 (digest email) needs app-level Mail.Send + ApplicationAccessPolicy; phase 3 (drafts +
+>   move-to-trash) needs Mail.ReadWrite + Mail.Send - Ethan said he'll grant in Entra. Known small
+>   gaps: mail filed to folders by Outlook RULES never hits the inbox delta (open decision, plan doc);
+>   a from-me-to-me edge case can land in needs_reply with a blank subject (model usually sorts it);
+>   second-sync ~19s is mostly the folder-list call - could skip when delta returns 0 changes.
+
+> **Resume note (2026-08-20) - Hit List II imported into Accounts (120 rows); Projects tab BUILT + SHIPPED (rev starbot--projects).**
 > - **Hit list migration DONE.** The real **Hit List II (management companies)** CSV is now in the shared
 >   Accounts table: **115 inserted, 120 total** (was the 5 pilot seeds). Source lives IN the project now:
 >   `Downloads/PersonalCRM/Star Hit List II(Management Companies).csv` (Ethan pulled a clean copy from
@@ -115,7 +167,7 @@ This file is the single source of truth for picking the project back up. Read it
 >   explicit `SESSION_SECRET` (it is NOT in `backend/.env`, so it is ephemeral per-process otherwise) and
 >   mint `jwt.encode({'sub': <user_id>, 'exp': ...}, SECRET, 'HS256')` into the `starbot_session` cookie.
 
-> **Follow-up (2026-08-20, later) - favicon added; starbot can now read/update the SHARED Accounts + Projects boards. BUILT + TESTED, NOT YET DEPLOYED.**
+> **Follow-up (2026-08-20, later) - favicon added; starbot can now read/update the SHARED Accounts + Projects boards. SHIPPED (rev starbot--sharedboards).**
 > - **Favicon (first one this app has ever had).** `frontend/public/favicon.svg` - a brand-red rounded
 >   plate with a WHITE 5-point star (matches the star in the app header). White-on-red on purpose: a bare
 >   red star disappears against a dark browser tab strip, and a filled shape reads better than a glyph at
@@ -164,10 +216,25 @@ This file is the single source of truth for picking the project back up. Read it
 >   status/updated_at/updated_by + log ids, logged a note, flipped status, then deleted the interaction
 >   and restored the stamps (verified `fully restored: True`); the project test used a throwaway row and
 >   deleted it. **Prod is unchanged: accounts still 120, projects/project_interactions still 0.**
-> - **NOT DONE:** not committed, not deployed. Also NOT added to the Claude connector
->   (`mcp_server.py`) - Ethan asked for starbot specifically. The op_* functions are already written and
->   connector-shaped, so adding them there later is small (wrap them as MCP tools the same way the todo
->   tools wrap chat.py's op_*), but it widens what claude.ai can touch, so it should be a deliberate call.
+> - **SHIPPED.** Commit `00adebf` (Ethan pushed). Deployed 2026-08-20:
+>   `acr build ... --image starbot:shared-boards .` (Run ID `ds1f`, 57s, digest `sha256:d89dd05e...`)
+>   then `containerapp update ... --revision-suffix sharedboards`. **Live revision =
+>   `starbot--sharedboards`** at 100% traffic. Previous revision `starbot--projects` kept Active at 0%
+>   as the rollback target (roll back by pointing `--image` at `starbot:projects-tab`).
+> - **Post-deploy verification:** cron `business-hours` scale rule survived again (checked via
+>   `containerapp show`: America/Los_Angeles, 7:30am-3:30pm Mon-Fri, desiredReplicas 1, min 0 / max 10).
+>   `/favicon.svg` returns **200 with content-type `image/svg+xml`**, 543 bytes matching source, and the
+>   served HTML carries both the icon link and the theme-color meta - so the `public/` -> dist -> static
+>   -> `serve_spa` path works end to end with no new route. `/api/projects` and `/api/accounts` both 401
+>   (present and auth-gated). Container logs show a CLEAN boot: "Application startup complete" plus
+>   "StreamableHTTP session manager started" (connector unaffected), no import errors.
+> - **Why the clean boot proves the new backend shipped:** `main.py` imports `chat`, and `chat.py` now
+>   imports `accounts` + `projects`. A bad import there would crash-loop the app instead of reaching
+>   startup-complete, so a healthy boot IS the evidence that the 8 new shared-board tools loaded in the
+>   container. (The favicon is the frontend's identity marker; both come from the same image.)
+> - **Still open:** the Claude connector (`mcp_server.py`) does NOT expose the shared boards - starbot
+>   chat only, per Ethan's ask. Adding them later is small since the op_* functions are connector-shaped.
+
 
 > **Follow-up same day (2026-08-20) - Accounts table reshaped, N+1 fixed, rep casing normalized, dump deleted.**
 > - **Accounts spreadsheet columns are now: Account | Rep | Phone | Props | Units | Status | Updated.**
