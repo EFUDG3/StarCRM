@@ -23,6 +23,7 @@ from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.orm import Session
 
 import accounts
+import digest
 import auth
 import cards
 import chat
@@ -64,6 +65,9 @@ def _ensure_schema() -> None:
         # ~/Documents/starbot-card-image-backup before this shipped.
         conn.execute(text("ALTER TABLE contacts DROP COLUMN IF EXISTS card_image"))
         conn.execute(text("ALTER TABLE contacts DROP COLUMN IF EXISTS card_image_type"))
+        # Email dismiss columns on email_threads (additive).
+        conn.execute(text("ALTER TABLE email_threads ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE email_threads ADD COLUMN IF NOT EXISTS dismissed_at_msg_id VARCHAR DEFAULT ''"))
         # Entra identity columns on users (additive; safe on existing data).
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS microsoft_oid VARCHAR"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR"))
@@ -328,6 +332,7 @@ app.include_router(mileage.router)
 app.include_router(accounts.router)
 app.include_router(projects.router)
 app.include_router(email_triage.router)
+app.include_router(digest.router)
 app.include_router(tasks.router)
 
 

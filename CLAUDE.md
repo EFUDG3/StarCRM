@@ -24,7 +24,175 @@ This file is the single source of truth for picking the project back up. Read it
 > (Ethan): Azure Maps over MapQuest; places per-user only; clipboard export incl. Stops
 > + Rate columns; own calendar only.
 
-> **Resume note (2026-08-21, LATEST) - EMAIL TRIAGE PHASE 1 BUILT + validated on real mail. Not committed/deployed.**
+> **Planning note (2026-08-25) - Mileage: PURPOSE-OF-TRAVEL field on manual trip entry.**
+> - **Gap:** the calendar-scan flow already fills a per-visit purpose (event title, grounded-hybrid
+>   from body when title is vague — decided 2026-07-20). Manual trip entry on the Mileage tab does
+>   NOT — the form has date + stops + rate only. The mileage report XLSX has a Purpose column and
+>   IRS substantiation explicitly requires business purpose per trip, so manual entries fall
+>   short of what the report needs.
+> - **Fix (small, ~30 min):** add a required `purpose` text input on the trip-entry form
+>   (`frontend/src/Mileage.jsx`). Store it on the trip: either a new `purpose` column on `Trip`
+>   OR reuse a single-string convention on the existing `legs_json` payload. The former is cleaner
+>   and matches how scanned visits carry their label — `Trip.purpose = String` additive column,
+>   default "" so existing rows aren't broken. Include in the log expandable row and in the CSV/
+>   XLSX export (mileage_report.py already has a Purpose column — just read `trip.purpose` when
+>   it's a manual entry, keep the visit label when it's from a scan).
+> - **When:** cheap enough to slip in alongside another mileage change; no user-facing dependencies.
+>   Add to the DDL migration in `_ensure_schema`: `ALTER TABLE trips ADD COLUMN IF NOT EXISTS
+>   purpose VARCHAR DEFAULT ''`.
+
+> **Planning note (2026-08-25) - PRODUCT CATALOG tab with commonly-stocked flooring items + labeled photos.**
+> - **The workflow this replaces (Ethan, 2026-08-25):** sales reps currently google a carpet /
+>   LVP / tile picture, open it in an image editor, type the product name on top, save the mangled
+>   result, then share it with a customer. Every rep does it every day. We should have this ready
+>   to go from Star's own stocked-item list, with the name already on the image.
+> - **Scope: shared company-wide (like Accounts), read-mostly.** Office admin adds/edits the
+>   catalog; sales reps search + share. Product data is not sensitive and every rep needs the same
+>   list, so shared is the right model. Version 1 covers commonly-stocked items only, not every
+>   SKU we can special-order.
+> - **Data model:**
+>   - `products` (id, name, brand, category [carpet|lvp|tile|hardwood|laminate|sheet_vinyl|cove_base|other],
+>     sku, color, series, description, tags_json, image_blob_key, thumbnail_blob_key, active BOOL,
+>     stocked BOOL, notes, updated_at, updated_by) — shared, no user_id.
+>   - Later: `product_categories` if we need color/collection hierarchy; skip for v1.
+> - **Image storage: Azure Blob Storage** (Star Personal CRM > Star Blob container, still to be
+>   provisioned — same setup discussed 2026-08-19 for the deferred architectural-plans upload).
+>   Direct browser upload with a short-lived SAS URL, image bytes never touch the container app.
+>   Store `image_blob_key` on the product row, generate a fresh read-SAS URL when the frontend
+>   requests it (cheap Azure SDK call). Auto-generate a thumbnail at upload time for the grid view.
+> - **The "labeled image" ask — HOW to actually deliver it:**
+>   - Store the RAW product photo, not a labeled variant. Labels change (name typos, rebrands)
+>     but photos don't, and we don't want to lose the original.
+>   - Render the label as a canvas overlay in the browser: product name + Star badge in a
+>     bottom-band, generated client-side from the raw image via `<canvas>` toBlob(). One button
+>     -> composite JPEG in clipboard, another -> download.
+>   - This means one raw image serves as-is on the catalog list AND as the "share to customer"
+>     asset, with the name text always current.
+> - **UI (mirrors Accounts):** grid of product cards (thumbnail + name + brand + category tag),
+>   filter chips by category, search across name/sku/color/brand/tags. Click card -> detail
+>   with full-res image, "Copy labeled image" + "Download labeled image" buttons, description,
+>   notes, stock status. Admin "Add product" / "Edit" gated to specific user set (or just
+>   trust-and-verify like Accounts — every write stamps updated_by).
+> - **Backend:** new `backend/products.py` (list/create/get/update/delete + Blob SAS helpers),
+>   `Product` model, `ProductIn` schema, `frontend/src/Products.jsx`, api.js. Chat.py gets
+>   `search_products` + `get_product` so starbot can answer "do we stock that Shaw pattern in
+>   greige?" from the shared catalog.
+> - **Blob storage is the real dependency**. This same account will later serve architectural
+>   plans (parked from 2026-08-19). Provisioning steps: Storage Account (starflooringblob),
+>   container `products` (private), managed identity or connection-string secret in Container
+>   Apps, `azure-storage-blob` in requirements. ~$0.02/GB/mo + minimal transaction cost.
+> - **When:** after phase-2 email digest ships AND after meeting-minutes tab. Provisioning the
+>   Blob account can happen in parallel any time — it unblocks both Products AND the future
+>   architectural-plans upload.
+
+> **Planning note (2026-08-25) - MEETING MINUTES tab, next up after phase-2 digest ships.**
+> - **Purpose:** every Teams meeting a user was in gets summarized and stored on THEIR profile,
+>   so anyone who attended has the record and anyone who didn't never sees it. Star runs
+>   everything in Teams and many crew use Read.ai natively.
+> - **Scope (Ethan's call 2026-08-25): PER-USER, not shared.** Same privacy model as
+>   Contacts/Todos/Email. A per-meeting "share to team" button in phase 2 (like the shared-account-
+>   facts idea) can promote specific meetings company-wide when a decision needs everyone. Default
+>   private — never opt-in-to-be-private.
+> - **Sources:**
+>   1. **Teams meetings (primary):** Graph `/me/onlineMeetings/{id}/transcripts/{tid}/content`
+>      returns the VTT. Requires new delegated scopes — `OnlineMeetings.Read` for listing +
+>      `OnlineMeetingTranscript.Read.All` for transcript bodies (admin consent required, ethan
+>      can grant). We do NOT need `Chat.Read` (which would pull all user chats — too broad).
+>   2. **Manual paste (fallback):** a text field on each meeting record, for when a transcript
+>      isn't available or someone took hand notes. Zero scopes.
+>   3. **Read.ai (supplemental, phase 2):** their webhook posts a JSON summary to a URL we own.
+>      Structured data, no chat scope needed. Skip parsing their Teams-chat notifications; the
+>      webhook is cleaner. Only wire this if the Teams-transcript path proves insufficient.
+> - **"Catch every meeting" strategy (Ethan's explicit ask): polling job, same pattern as the
+>   digest.** A Container Apps Job runs every ~30 min per work-hours cron and for each opted-in
+>   user: list their recent onlineMeetings, find the ones that ended AND have a transcript AND we
+>   haven't stored yet, fetch the VTT, summarize via Claude (Ethan has an existing skill for this
+>   — reuse the prompt), store the summary. Cheaper than change notifications for our volume and
+>   simpler than the transcript-subscription model (which has strict lifetime rules).
+> - **Model (tentative):** `meetings` (id, user_id, source, teams_meeting_id, title, start_at,
+>   end_at, organizer, attendees_json, transcript_url, recording_url, shared BOOL DEFAULT
+>   FALSE, created_at) and `meeting_notes` (meeting_id, summary TEXT, decisions TEXT,
+>   action_items_json, generated_by, raw_transcript_ref). NO raw transcripts stored in Postgres
+>   — keep the SharePoint/OneDrive link; the transcript itself can be many MB and re-fetching is
+>   cheap. Same reasoning as the "no email bodies" rule from phase-1.
+> - **Action-item extraction (worth doing on day 1):** the summarizer returns a JSON array
+>   `[{owner, action, due?}]`. If `owner` matches the signed-in user's first name, optionally
+>   create a todo with `source_link` pointing at the meeting record. That closes the loop from
+>   "Salam said in the meeting I should X" -> a real task on Tuesday morning.
+> - **UI shape (matches the tab family):** list ranked by start_at desc; row = title, date,
+>   attendee count, action-item count; click into detail = summary + decisions + action-items
+>   (checkable) + link to Teams recording + expandable transcript. Same lucide icon pattern
+>   (MessageSquare or Presentation). Manual "Add meeting" button for the fallback path.
+> - **Backend:** new `backend/meetings.py` (list/get/log/share endpoints + poll_teams_meetings
+>   job entrypoint mirroring digest's shape), Meeting/MeetingNote models, MeetingIn schema,
+>   `frontend/src/Meetings.jsx` mirroring the Projects tab, api.js helpers. Chat.py gets 2-3
+>   new starbot tools (list_meetings, get_meeting_summary) so starbot can answer "what did
+>   we decide in the sales meeting Tuesday?".
+> - **Deferred until:** phase-2 digest is live (target 2026-08-25 today). Then meetings is
+>   next in line.
+
+> **Resume note (2026-08-25, LATEST) - Digest built (phase 2 CONTENT + preview). Not yet sending; Mail.Send still to grant Monday.**
+> - **What shipped today (working tree, not committed):** `backend/digest.py` — build_digest() +
+>   render_html() + render_text() + `/api/email/digest/preview{,.json,.txt}` endpoints. Reads only
+>   from the DB (email_threads, contacts, accounts, projects) for the read-only sections plus a
+>   BEST-EFFORT delegated Graph calendar call for a new "Coming up" section (tomorrow through
+>   +6 days, day-grouped, drops today by design because Star Mail's "your day" covers that).
+> - **Design decisions worth keeping:**
+>   1. **Table layout + inline styles** in render_html — Outlook 2016+ desktop has terrible CSS
+>      support; class selectors and <style> blocks are unreliable. Brand palette (INK/MIST/SEA/
+>      TIDE) baked into inline styles.
+>   2. **Empty digests DON'T send.** run_daily_digests skips users whose sections are all empty
+>      and logs "empty-skipped". A blank digest teaches archive-on-sight for future ones.
+>   3. **Best-effort Graph token** for calendar. If m365.get_graph_token() throws (stale MSAL
+>      cache, revoked consent), the calendar section is skipped but the rest of the digest still
+>      goes out. Cron uses `try: get_graph_token` and falls back to None. Never make one section's
+>      failure block the whole digest.
+>   4. **Preview endpoint uses signed-in user's session cookie** to grab their token. Renders
+>      THEIR digest, live, in browser — how we iterated on the design.
+>   5. **run_daily_digests(dry_run=True)** default. Container-job entrypoint. Flip to False after
+>      Mail.Send lands + Container Apps Job is provisioned.
+>   6. **send_digest() written but raises RuntimeError** with the 4-step enablement instructions
+>      until app_token is passed. Documented in the exception message so a Monday-morning "what
+>      does this need again" question is answered in the traceback.
+> - **The "Coming up" section (Ethan's ask 2026-08-25): "I need to be somewhere tomorrow but it
+>   isn't in my todo because it's not today. However it's important to know today because it
+>   changes what I do today."** Digest now pulls tomorrow-through-end-of-week Graph calendarView,
+>   groups by day (Tomorrow / Weekday / Weekday+Date), shows time (12h format, `9:00a`), title,
+>   trimmed location. Skipping today is DELIBERATE — do NOT re-add. Sample rendered against
+>   Ethan's real calendar: "Tomorrow — Aug 26 / 11:00a End Neon DB / 1:00p Meeting with the City
+>   for Building Plans (Mission Valley)". Works.
+> - **Wired:** `main.py` imports digest, `include_router(digest.router)`. No new frontend for
+>   digest itself (preview is a browser tab, not an app tab).
+> - **Not yet done (Monday):**
+>   1. Create `starbot@starflooringandremodeling.com` shared mailbox in Exchange.
+>   2. Entra: Mail.Send APPLICATION permission on app `066b737b` + admin consent.
+>   3. `New-ApplicationAccessPolicy` scoping Mail.Send to the shared mailbox only. Copy the exact
+>      PowerShell from the send_digest docstring.
+>   4. Container Apps Job resource: same image, cron `30 14 * * 1-5` (7:30am Pacific = 14:30 UTC),
+>      entrypoint = `python -c "import digest; digest.run_daily_digests(app_token=<msal_cc>,
+>      dry_run=False)"`. MSAL client-credentials acquires the app token at start of run.
+>   5. Rollout to Salam + Ethan first for a week; expand after tuning.
+> - **MOTW / Excel Protected View fix (Ethan's ask 2026-08-25, related to mileage report).** Not
+>   a file encoding issue — Windows attaches Mark of the Web to browser downloads, Excel Protected
+>   Views them, which BLOCKS AUTO-CALCULATION until Enable Editing. **Fix at Ethan's scale:
+>   Intune Site to Zone Assignment List, scoped to the FQDN `starbot.starflooringandremodeling.
+>   com` (value 1 = Local Intranet), NOT the parent domain** — trusting the parent inherits every
+>   subdomain including any rogue one (DNS still hosts at securedservers.info, which has NXDOMAIN'd
+>   twice). Local Intranet zone also enables Integrated Windows Auth by default — turn IWA off for
+>   this zone in the same policy set since starbot uses Entra OAuth exclusively. Optional harden:
+>   HSTS with includeSubDomains on the app response headers. **BLOCKED: Ethan can't create Intune
+>   policies as admin — that scope sits with IT (DataNet). Not worth escalating; users just hit
+>   Enable Editing each time. Revisit only if the Products tab (labeled photos over Blob) makes
+>   this annoyance daily instead of weekly.**
+> - **Also added (planning notes at top of this file):** MEETING MINUTES tab (per-user, Teams
+>   transcripts + Read.ai webhook + manual paste), MILEAGE purpose-of-travel column on manual
+>   trip entry, PRODUCT CATALOG tab with Blob-backed images and client-side canvas label overlay.
+>   All deferred until digest is sending.
+> - **Random-context note (2026-08-25):** confirmed Notion MCP connected as
+>   `ethantfudge@gmail.com` (personal), NOT `efudge1952@sdsu.edu`. Reauthorize if Notion access
+>   under SDSU is wanted later.
+
+> **Resume note (2026-08-21) - EMAIL TRIAGE PHASE 1 BUILT + validated on real mail. Not committed/deployed.**
 > - **What it is:** a new **Email tab** (`#email`, "Star Mail", Inbox icon, sits after Tasks) that ranks
 >   the signed-in user's inbox at THREAD level into four lanes - Needs your reply / Waiting on them /
 >   Worth knowing / Cleanup candidates - with the REASON each thread ranked shown on the row (the

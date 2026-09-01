@@ -458,6 +458,12 @@ class EmailThread(Base):
     account_id = Column(String, nullable=True)           # matched shared account (domain match)
     account_name = Column(String, default="")
     triaged_at = Column(DateTime, server_default=func.now())
+    # Dismiss: the user manually removed this from their lanes (e.g. a
+    # cold pitch they don't want to reply to). When a NEW message lands
+    # after dismissal (last_message_id != dismissed_at_msg_id) the dismiss
+    # is cleared automatically and the thread re-surfaces.
+    dismissed_at = Column(DateTime, nullable=True)
+    dismissed_at_msg_id = Column(String, default="")
     created_at = Column(DateTime, server_default=func.now())
 
 

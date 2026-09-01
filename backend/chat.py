@@ -17,6 +17,7 @@ import anthropic
 from sqlalchemy.orm import Session
 
 import accounts
+import email_triage
 import graph
 import mcp_server
 import projects
@@ -443,6 +444,42 @@ TOOLS = [
             "required": ["project_id", "stage"],
         },
     },
+    {
+        "name": "list_ranked_emails",
+        "description": (
+            "The Star Mail tab's ranked view of the USER'S OWN inbox — the same triage "
+            "verdicts the tab shows. Use this to answer 'what needs my reply', 'what did "
+            "I miss', 'what's in my worth-knowing pile'. Returns compact rows (no bodies) "
+            "with each thread's ranking reason so you can explain WHY it landed there. "
+            "Prefer this over the raw email tools when the user asks about their triage "
+            "queue; use read_email if the user wants the actual message body."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "state": {
+                    "type": "string",
+                    "enum": ["needs_reply", "fyi", "cleanup", "dismissed", "all"],
+                    "description": "which lane (default needs_reply)",
+                },
+                "limit": {"type": "integer", "description": "max rows (default 15, max 40)"},
+            },
+        },
+    },
+    {
+        "name": "get_email_thread",
+        "description": (
+            "One triaged thread in full: verdict, reason, category, plus a metadata-only "
+            "per-message trail (message ids, directions, senders, timestamps). No bodies — "
+            "if the user wants the actual content, call read_email with a message id from "
+            "the trail."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"thread_id": _STR},
+            "required": ["thread_id"],
+        },
+    },
 ]
 
 # Anthropic server-side web search: Claude issues the query, Anthropic runs it
@@ -463,11 +500,13 @@ def _system_prompt(user: User) -> str:
 
 You can read the user's Outlook email and calendar, search company SharePoint/OneDrive \
 files, manage their starbot to-do list, and look up their Star CRM contacts — those are all \
-PRIVATE to this signed-in user. You can also read and update two SHARED team boards that \
-everyone at Star sees: ACCOUNTS, the sales hit list of about 120 property-management \
-companies, and PROJECTS, the PM team's large commercial construction jobs such as schools \
-and restaurants. You can also search the web for current or general information that isn't \
-in Star's own data.
+PRIVATE to this signed-in user. You can also see the STAR MAIL ranking of this user's own \
+inbox (list_ranked_emails / get_email_thread) — that is the same triage the Email tab shows, \
+and it is the best way to answer 'what needs my reply' without dumping the whole mailbox. \
+You can also read and update two SHARED team boards that everyone at Star sees: ACCOUNTS, \
+the sales hit list of about 120 property-management companies, and PROJECTS, the PM team's \
+large commercial construction jobs such as schools and restaurants. You can also search the \
+web for current or general information that isn't in Star's own data.
 
 Rules:
 - CITE SOURCES. When an answer draws on an email, event, or file, cite it inline as a \
@@ -578,6 +617,14 @@ def _run_tool(name: str, args: dict, user: User, db: Session, token: str):
         )
     if name == "set_project_stage":
         return projects.op_project_set_stage(db, user, args["project_id"], args["stage"])
+    # --- Email triage (user-scoped, read from our stored verdicts) ---
+    if name == "list_ranked_emails":
+        return email_triage.op_list_ranked_emails(
+            db, user, state=args.get("state", "needs_reply"),
+            limit=int(args.get("limit") or 15),
+        )
+    if name == "get_email_thread":
+        return email_triage.op_get_email_thread(db, user, args["thread_id"])
     raise ValueError(f"Unknown tool: {name}")
 
 

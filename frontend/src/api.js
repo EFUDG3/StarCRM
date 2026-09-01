@@ -257,3 +257,8 @@ export const emailSync = () =>
   sessionRequest("/api/email/sync", { method: "POST" });
 export const setEmailPrefs = (data) =>
   sessionRequest("/api/email/prefs", { method: "PUT", body: JSON.stringify(data) });
+
+export const dismissEmailThread = (id) =>
+  sessionRequest(`/api/email/threads/${id}/dismiss`, { method: "POST" });
+export const undismissEmailThread = (id) =>
+  sessionRequest(`/api/email/threads/${id}/undismiss`, { method: "POST" });
