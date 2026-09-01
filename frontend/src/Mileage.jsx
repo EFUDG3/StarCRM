@@ -49,7 +49,12 @@ export default function MileageTracker() {
 
   const [startAddr, setStartAddr] = useState(OFFICE);
   const [tripDate, setTripDate] = useState(todayISO()); // travel day, not save day
-  const [stops, setStops] = useState([""]);
+  // Each stop carries an ADDRESS and an optional PURPOSE. The purpose is
+  // free-text ("Site visit at Fairfield") that the report includes verbatim
+  // in the Purpose column for that leg. Blank is fine; the report falls back
+  // to the calendar-scan visit label from place_visits when the manual field
+  // is empty (see backend/mileage.py:_leg_purpose).
+  const [stops, setStops] = useState([{ address: "", purpose: "" }]);
   const [returnTrip, setReturnTrip] = useState(true);
   const [result, setResult] = useState(null); // /route response + its date
   const [busy, setBusy] = useState(false);
@@ -94,26 +99,30 @@ export default function MileageTracker() {
   }, [me?.signedIn]);
 
   // --- Entry ----------------------------------------------------------------
-  const setStop = (i, v) => setStops((cur) => cur.map((s, j) => (j === i ? v : s)));
-  const addStopField = () => setStops((cur) => [...cur, ""]);
+  const setStopAddress = (i, v) =>
+    setStops((cur) => cur.map((s, j) => (j === i ? { ...s, address: v } : s)));
+  const setStopPurpose = (i, v) =>
+    setStops((cur) => cur.map((s, j) => (j === i ? { ...s, purpose: v } : s)));
+  const addStopField = () => setStops((cur) => [...cur, { address: "", purpose: "" }]);
   const removeStopField = (i) =>
-    setStops((cur) => (cur.length > 1 ? cur.filter((_, j) => j !== i) : [""]));
+    setStops((cur) => (cur.length > 1 ? cur.filter((_, j) => j !== i) : [{ address: "", purpose: "" }]));
 
-  // Clicking a place fills the first empty stop, or appends a new one.
+  // Clicking a place fills the first empty stop's address, or appends a new one.
   const useAsStop = (address) => {
     setStops((cur) => {
-      const i = cur.findIndex((s) => !s.trim());
-      if (i === -1) return [...cur, address];
-      return cur.map((s, j) => (j === i ? address : s));
+      const i = cur.findIndex((s) => !s.address.trim());
+      if (i === -1) return [...cur, { address, purpose: "" }];
+      return cur.map((s, j) => (j === i ? { ...s, address } : s));
     });
   };
 
   const calculate = async () => {
-    const mid = stops.map((s) => s.trim()).filter(Boolean);
-    if (mid.length === 0) {
+    const validStops = stops.filter((s) => s.address.trim());
+    if (validStops.length === 0) {
       setError("Add at least one stop.");
       return;
     }
+    const mid = validStops.map((s) => s.address.trim());
     const addresses = [startAddr.trim() || OFFICE, ...mid];
     if (returnTrip) addresses.push(startAddr.trim() || OFFICE);
     setBusy(true);
@@ -134,9 +143,20 @@ export default function MileageTracker() {
   const saveToLog = async () => {
     if (!result || saved) return;
     try {
+      // Merge per-stop purposes onto legs. Legs are ordered:
+      //   [start -> stop0, stop0 -> stop1, ..., lastStop -> start(return)]
+      // so leg[i].to is stops[i].address for the non-return legs, and the
+      // return leg (if any) has an empty purpose (backend auto-labels
+      // "Return to office"). Blank strings are dropped — only user-typed
+      // purposes ride through into legs_json.
+      const validStops = stops.filter((s) => s.address.trim());
+      const legsWithPurpose = result.legs.map((leg, i) => {
+        const p = validStops[i]?.purpose?.trim();
+        return p ? { ...leg, purpose: p } : leg;
+      });
       await api.saveTrip({
         date: result.date,
-        legs: result.legs,
+        legs: legsWithPurpose,
         totalMiles: result.totalMiles,
         rate: effRate, // the entry-form rate rides with the trip
         resolved: result.resolved,
@@ -173,10 +193,12 @@ export default function MileageTracker() {
   const dayName = (iso) =>
     new Date(iso + "T12:00:00").toLocaleDateString(undefined, { weekday: "short" });
 
-  // One click turns a scanned day into the trip form: its stops, its date.
+  // One click turns a scanned day into the trip form: its stops (with the
+  // calendar-scan visit label prefilled as the purpose — editable, since a
+  // rushed title may not be what the user wants on their mileage report).
   const loadDay = (date, dayVisits) => {
     setTripDate(date);
-    setStops(dayVisits.map((v) => v.address));
+    setStops(dayVisits.map((v) => ({ address: v.address, purpose: v.label || "" })));
     setResult(null);
     setSaved(false);
     setError("");
@@ -220,14 +242,37 @@ export default function MileageTracker() {
     setRepBusy(false);
   };
 
-  // Logged days not covered by the preview — candidates for "Add from log"
-  // (e.g. a manually entered trip that never came from the calendar).
+  // Log-only mode: skip the calendar scan entirely and build a report
+  // straight from logged trips. Populates repData with an empty preview
+  // shape so the report UI renders, then opens the log picker so the user
+  // can pick trips to include. Cheap — no Graph call, no route calc; the
+  // trips are already in the log with their own rates.
+  const useLogOnly = () => {
+    let s = repStart, e = repEnd;
+    if (s && e && s > e) {
+      [s, e] = [e, s];
+      setRepStart(s);
+      setRepEnd(e);
+    }
+    setRepMsg("");
+    setRepData({ days: [], rate: rate ?? 0.7250, mixedRates: false });
+    setRepExcluded(new Set());
+    setRepAddOpen(true);
+  };
+
+  // Logged days IN THE REPORT RANGE not already covered by the preview —
+  // candidates for "Add from log". Range filter matters especially in
+  // log-only mode (where the preview is empty by design), so a July report
+  // doesn't offer to pull in June trips.
   const logCandidates = (() => {
     if (!repData) return [];
     const inPreview = new Set(repData.days.map((d) => d.date));
+    const s = repStart, e = repEnd;
     const by = new Map();
     (trips || []).forEach((t) => {
       if (inPreview.has(t.date)) return;
+      if (s && t.date < s) return;
+      if (e && t.date > e) return;
       if (!by.has(t.date)) by.set(t.date, []);
       by.get(t.date).push(t);
     });
@@ -464,17 +509,26 @@ export default function MileageTracker() {
           <span className={cap} style={{ color: SEA }}>Stops</span>
           <div className="space-y-2 mb-2">
             {stops.map((s, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <span className="font-mono text-xs w-5 text-right shrink-0" style={{ color: "#8b9a9f" }}>{i + 1}</span>
-                <input
-                  className={field}
-                  style={bc}
-                  list="mileage-places"
-                  placeholder="Full address (saved places autocomplete)"
-                  value={s}
-                  onChange={(e) => setStop(i, e.target.value)}
-                />
-                <button onClick={() => removeStopField(i)} className="p-1.5 rounded hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Remove stop">
+              <div key={i} className="flex items-start gap-2">
+                <span className="font-mono text-xs w-5 text-right shrink-0 pt-2" style={{ color: "#8b9a9f" }}>{i + 1}</span>
+                <div className="flex-1 space-y-1">
+                  <input
+                    className={field}
+                    style={bc}
+                    list="mileage-places"
+                    placeholder="Full address (saved places autocomplete)"
+                    value={s.address}
+                    onChange={(e) => setStopAddress(i, e.target.value)}
+                  />
+                  <input
+                    className={field + " text-[13px]"}
+                    style={{ ...bc, background: "#fafaf8" }}
+                    placeholder="Purpose (optional) — e.g. site visit, walkthrough, samples drop"
+                    value={s.purpose}
+                    onChange={(e) => setStopPurpose(i, e.target.value)}
+                  />
+                </div>
+                <button onClick={() => removeStopField(i)} className="p-1.5 rounded hover:bg-stone-100 shrink-0 mt-1" style={{ color: TIDE }} title="Remove stop">
                   <Trash2 size={14} />
                 </button>
               </div>
@@ -581,28 +635,43 @@ export default function MileageTracker() {
                 onChange={(e) => { setRepEnd(e.target.value); setRepMonth(""); }} />
             </label>
           </div>
-          <button
-            onClick={pullReport}
-            disabled={repBusy}
-            className="w-full py-2.5 rounded text-white text-[15px] font-medium disabled:opacity-60"
-            style={{ background: SEA }}
-          >
-            {repBusy ? "Pulling calendar & calculating…" : "Pull & calculate"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={pullReport}
+              disabled={repBusy}
+              className="flex-1 py-2.5 rounded text-white text-[15px] font-medium disabled:opacity-60"
+              style={{ background: SEA }}
+            >
+              {repBusy ? "Pulling calendar & calculating…" : "Pull & calculate"}
+            </button>
+            <button
+              onClick={useLogOnly}
+              disabled={repBusy}
+              className="py-2.5 px-4 rounded text-[15px] font-medium disabled:opacity-60"
+              style={{ background: MIST, color: INK, border: "1px solid #cdd6d4" }}
+              title="Skip the calendar scan — build a report straight from logged trips."
+            >
+              Build from log
+            </button>
+          </div>
           <div className="font-mono text-[11px] mt-2 leading-relaxed" style={{ color: "#8b9a9f" }}>
-            Scans your Outlook calendar for the range (max one month), keeps days already in the log
-            as-is, and route-calculates the rest for review below.
+            <b>Pull & calculate</b> scans your Outlook calendar for the range (max one month), keeps
+            days already in the log as-is, and route-calculates the rest.{" "}
+            <b>Build from log</b> skips the calendar and lets you pick straight from logged trips —
+            useful when you've entered everything by hand.
           </div>
           {repMsg && <div className="font-mono text-[12px] mt-2" style={{ color: "#4a5a60" }}>{repMsg}</div>}
         </section>
 
-        {repData && repData.days.length > 0 && (
+        {repData && (
           <section className="bg-white rounded-lg p-5 border-l-4" style={{ borderColor: "#C8B89A" }}>
             <div className="font-mono text-xs uppercase tracking-widest mb-1" style={{ color: SEA }}>
-              Preview
+              {repData.days.length > 0 ? "Preview" : "Report contents"}
             </div>
             <div className="text-[13px] mb-3" style={{ color: "#4a5a60" }}>
-              Uncheck any day you don't want in the report.
+              {repData.days.length > 0
+                ? "Uncheck any day you don't want in the report."
+                : "Pick logged days below with “Add from log”, then generate the spreadsheet."}
             </div>
             {repData.mixedRates && (
               <div className="rounded p-2.5 text-[13px] mb-3" style={{ background: "#FDF6E3", color: "#8a6d1c", border: "1px solid #e6d9a8" }}>

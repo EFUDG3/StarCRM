@@ -515,9 +515,19 @@ def _visit_purposes(db: Session, user: User, lo: str, hi: str) -> dict:
 
 def _leg_purpose(leg: dict, i: int, n: int, start_addr: str,
                  day: str, purposes: dict) -> str:
+    """Priority stack for a leg's Purpose column on the mileage report:
+      1. "Return to office" — the last leg landing back at the start.
+      2. `leg.purpose` — manual per-stop purpose from the trip entry form.
+         Introduced 2026-09-01; legacy trips without it fall through.
+      3. Calendar-scan visit label — matched by (day, address) from the
+         place_visits table.
+      4. Blank."""
     to = (leg.get("to") or "").strip()
     if i == n - 1 and n > 1 and to.lower() == (start_addr or "").strip().lower():
         return "Return to office"
+    manual = (leg.get("purpose") or "").strip()
+    if manual:
+        return manual
     return purposes.get((day, to.lower()), "")
 
 
