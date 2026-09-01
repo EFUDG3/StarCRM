@@ -130,9 +130,18 @@ export default function MileageTracker() {
     setSaved(false);
     try {
       const r = await api.mileageRoute(addresses);
+      // Merge per-stop purposes onto the returned legs by index. The routing
+      // API doesn't know about purposes; we keep them client-side and stitch
+      // them in so BOTH the just-calculated preview AND the save payload
+      // read purpose from one place (`leg.purpose`). Only non-blank rides
+      // through — blank means "no purpose entered", not "clear the label".
+      const legsWithPurpose = r.legs.map((leg, i) => {
+        const p = validStops[i]?.purpose?.trim();
+        return p ? { ...leg, purpose: p } : leg;
+      });
       // The trip carries the TRAVEL day (form field, prefilled by "Load day"
       // or today) — not the day the save button happened to be clicked.
-      setResult({ ...r, date: tripDate || todayISO() });
+      setResult({ ...r, legs: legsWithPurpose, date: tripDate || todayISO() });
     } catch (e) {
       setError(e.message || "Route failed.");
       setResult(null);
@@ -143,20 +152,12 @@ export default function MileageTracker() {
   const saveToLog = async () => {
     if (!result || saved) return;
     try {
-      // Merge per-stop purposes onto legs. Legs are ordered:
-      //   [start -> stop0, stop0 -> stop1, ..., lastStop -> start(return)]
-      // so leg[i].to is stops[i].address for the non-return legs, and the
-      // return leg (if any) has an empty purpose (backend auto-labels
-      // "Return to office"). Blank strings are dropped — only user-typed
-      // purposes ride through into legs_json.
-      const validStops = stops.filter((s) => s.address.trim());
-      const legsWithPurpose = result.legs.map((leg, i) => {
-        const p = validStops[i]?.purpose?.trim();
-        return p ? { ...leg, purpose: p } : leg;
-      });
+      // result.legs already carries `purpose` per leg (stitched in during
+      // calculate()), so we just pass it through. Return leg (if any) has
+      // no purpose set — backend auto-labels "Return to office" at export.
       await api.saveTrip({
         date: result.date,
-        legs: legsWithPurpose,
+        legs: result.legs,
         totalMiles: result.totalMiles,
         rate: effRate, // the entry-form rate rides with the trip
         resolved: result.resolved,
@@ -575,10 +576,17 @@ export default function MileageTracker() {
             <table className="w-full text-[13px]">
               <tbody>
                 {result.legs.map((l, i) => (
-                  <tr key={i} className="border-t" style={{ borderColor: "#eee9e2" }}>
+                  <tr key={i} className="border-t align-top" style={{ borderColor: "#eee9e2" }}>
                     <td className="px-4 py-2" style={{ color: "#4a5a60" }}>{i + 1}. {l.from}</td>
                     <td className="px-1 py-2" style={{ color: "#8b9a9f" }}>→</td>
-                    <td className="px-2 py-2" style={{ color: "#4a5a60" }}>{l.to}</td>
+                    <td className="px-2 py-2" style={{ color: "#4a5a60" }}>
+                      {l.purpose && (
+                        <div className="text-[12px] font-semibold leading-tight mb-0.5" style={{ color: SEA }}>
+                          {l.purpose}
+                        </div>
+                      )}
+                      {l.to}
+                    </td>
                     <td className="px-2 py-2 text-right font-mono font-medium whitespace-nowrap">{l.miles.toFixed(1)} mi</td>
                     <td className="px-4 py-2 text-right font-mono whitespace-nowrap" style={{ color: "#8b9a9f" }}>{l.minutes}m</td>
                   </tr>
@@ -849,9 +857,22 @@ export default function MileageTracker() {
                           Start: {t.legs[0]?.from}
                         </div>
                         {t.legs.map((l, i) => (
-                          <div key={i} className="flex items-baseline justify-between gap-3 text-[13px]">
-                            {/* i past the stop count = the drive back to start */}
-                            <span style={{ color: "#4a5a60" }}>{i + 1}. {l.to}{i >= tripStops.length ? " (return)" : ""}</span>
+                          <div key={i} className="flex items-start justify-between gap-3 text-[13px]">
+                            <div className="min-w-0">
+                              {/* Purpose on its own line above the address so
+                                  a scanner can read "why went there" first,
+                                  then the destination. Only rendered when
+                                  present — return-leg auto-labels as
+                                  "Return to office" at report time but the
+                                  UI here shows the "(return)" suffix instead. */}
+                              {l.purpose && (
+                                <div className="text-[12px] font-semibold leading-tight" style={{ color: SEA }}>
+                                  {l.purpose}
+                                </div>
+                              )}
+                              {/* i past the stop count = the drive back to start */}
+                              <span style={{ color: "#4a5a60" }}>{i + 1}. {l.to}{i >= tripStops.length ? " (return)" : ""}</span>
+                            </div>
                             <span className="font-mono text-[12px] shrink-0" style={{ color: "#8b9a9f" }}>
                               {l.miles.toFixed(1)} mi · {l.minutes}m
                             </span>
