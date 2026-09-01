@@ -131,7 +131,65 @@ This file is the single source of truth for picking the project back up. Read it
 > - **Deferred until:** phase-2 digest is live (target 2026-08-25 today). Then meetings is
 >   next in line.
 
-> **Resume note (2026-08-25, LATEST) - Digest built (phase 2 CONTENT + preview). Not yet sending; Mail.Send still to grant Monday.**
+> **Resume note (2026-09-01, LATEST) - Email refinements + phase-2 digest content SHIPPED (rev starbot--emailv2, commit 1d9f945). Digest still not SENDING (Mail.Send).**
+> - **Live:** commit `1d9f945` on image `starbot:email-refinements` (build `ds1g`, 62s), revision
+>   `starbot--emailv2` at 100% traffic. Rollback target `starbot--newdbpass` on `starbot:shared-boards`
+>   kept Active at 0%. Cron `business-hours` scale rule survived the update (verified via `containerapp
+>   show`). Identity check confirms new code: `/api/email/digest/preview` returns 401 (new route auth-
+>   gated, not 404). Health 200 in 1s warm.
+> - **What's live for the team:**
+>   - Email tab: filter chips (All / Reply / FYI / Cleanup / Dismissed), search bar, **sort toggle
+>     (Importance/Newest/Oldest)** \[added today\], dismiss + **bulk-dismiss w/ sticky action bar**,
+>     importance dot on rank >= 65
+>   - **Cross-thread reply detection (added today):** if user has sent to sender-X in ANY other thread
+>     after our thread's last inbound, demote to fyi with reason "you may have replied in another thread
+>     — verify". Cheap DB scan via `_build_outbound_map()` (precomputed per sync, no Graph, no tokens).
+>     Requires trail records with `to` field — old records skipped silently, new syncs backfill going
+>     forward. Ethan confirmed today it correctly demoted his real 30-day false-positive case.
+>   - Triage engine refinements: ticket-system rule (DataNet ticket updates -> fyi unless direct
+>     question), recorder-bot filter (Read.ai / Fathom / Otter -> cleanup), cold outreach -> fyi (still
+>     visible, not tasked), robot-sender demotion (support@, no-reply, contact@), ack fast-path ("got it,
+>     thanks!" -> resolved), statement-answered routing, model prompt tightened (defaults to fyi on
+>     uncertainty), fail-SAFE not fail-open (model batch failure -> fyi, was needs_reply)
+>   - Waiting-on-them lane REMOVED (Ethan: "if I already replied it's not a task"). "N handled" split
+>     into "N you replied · N closed on their own" for transparency.
+>   - Starbot: `list_ranked_emails` + `get_email_thread` tools (22 total). Chat can now answer "what
+>     needs my reply?" from stored verdicts instead of dumping the inbox.
+>   - **Digest phase-2 CONTENT live** at `/api/email/digest/preview{,.json,.txt}` — Salam can see his own
+>     rendered digest in browser without any send infrastructure. Coming-up section (tomorrow through
+>     end-of-week calendar) added; delegated Graph token best-effort fetch, degrades to empty section on
+>     stale MSAL cache.
+> - **What's NOT live yet:** `send_digest()` stub raises RuntimeError until app-level `Mail.Send` is
+>   granted + service mailbox `starbot@starflooringandremodeling.com` exists + ApplicationAccessPolicy
+>   restricts scope + Container Apps Job provisioned. Docstring on the stub has the 4-step enablement
+>   in the traceback. `run_daily_digests(dry_run=True)` runs the whole pipeline against opted-in users
+>   and logs subjects/byte counts without sending — useful for pre-flight testing.
+> - **Local dev gotchas hit today (both are re-runs of documented ones):**
+>   1. Local sign-in 500'd because SESSION_SECRET wasn't in `.env` — `--reload` restarted uvicorn on a
+>      file save between login-start and callback, state-cookie signed with old ephemeral secret couldn't
+>      verify against new one. Fix is permanent: `SESSION_SECRET=any-long-random-string` in
+>      `backend/.env`.
+>   2. Orphaned socket after `Stop-Process` on uvicorn (multiprocessing child inherited listening
+>      handle). Documented in Notion Failure Modes now with correct sequence: netstat check ->
+>      `Get-CimInstance Win32_Process | Where CommandLine -match 'multiprocessing-fork' | ForEach-Object
+>      { Stop-Process -Id $_.ProcessId -Force }` -> reverify -> restart. Do NOT pipe Get-CimInstance
+>      straight to Stop-Process — property-name binding fails and PowerShell looks up by `.Name`.
+> - **Notion doc structure (2026-08-30):** Star Bot page is now a lean TOC with 9 subpages: Overview,
+>   Architecture, Authentication & Identity, Deployment, Database, Costs, Local Development, Failure
+>   Modes, Handoff Checklist. Handoff Checklist covers everything that needs to transfer when Ethan
+>   leaves. DB admin password was in the OLD Notion page — rotated + stripped from Notion + stored in
+>   company vault (Ethan, 2026-08-30). Intune policy for MOTW/Excel Protected View **blocked** —
+>   DataNet-scoped, Ethan can't do; users will keep hitting Enable Editing.
+> - **Feedback loop now working:** phase-1 tab in production means Salam actually uses it, generates
+>   the tuning data for the next iteration. Digest preview means design can iterate on real content
+>   before send goes live. Every triage rule added in the last two weeks came from a wrong verdict on
+>   Ethan's actual inbox.
+> - **Next up (Ethan's plan):** enable Mail.Send + provision Container Apps Job = phase 2 complete.
+>   Then phase 3 (autodrafts + move-to-trash on Cleanup, both need Mail.ReadWrite). Then meeting-minutes
+>   tab (planning note above), then product catalog (planning note above), then mileage purpose field
+>   (planning note above).
+
+> **Resume note (2026-08-25) - Digest built (phase 2 CONTENT + preview). Not yet sending; Mail.Send still to grant Monday.**
 > - **What shipped today (working tree, not committed):** `backend/digest.py` — build_digest() +
 >   render_html() + render_text() + `/api/email/digest/preview{,.json,.txt}` endpoints. Reads only
 >   from the DB (email_threads, contacts, accounts, projects) for the read-only sections plus a
