@@ -422,7 +422,7 @@ export default function MileageTracker() {
       <section className="bg-white rounded-lg p-8 text-center border-l-4 max-w-lg mx-auto mt-8" style={{ borderColor: SEA }}>
         <MapPin size={28} style={{ color: SEA }} className="mx-auto mb-3" />
         <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "Georgia, serif" }}>Mileage tracker</h2>
-        <p className="text-[15px] mb-5" style={{ color: "#4a5a60" }}>
+        <p className="text-[15px] mb-5" style={{ color: "#343e41" }}>
           Trips and saved places are tied to your Microsoft account. Sign in to start logging.
         </p>
         <a href={api.authLoginUrl()} className="inline-flex items-center gap-2 px-5 py-2.5 rounded text-white text-sm font-medium" style={{ background: INK }}>
@@ -511,7 +511,7 @@ export default function MileageTracker() {
           <div className="space-y-2 mb-2">
             {stops.map((s, i) => (
               <div key={i} className="flex items-start gap-2">
-                <span className="font-mono text-xs w-5 text-right shrink-0 pt-2" style={{ color: "#8b9a9f" }}>{i + 1}</span>
+                <span className="font-mono text-xs w-5 text-right shrink-0 pt-2" style={{ color: "#5f6e74" }}>{i + 1}</span>
                 <div className="flex-1 space-y-1">
                   <input
                     className={field}
@@ -529,7 +529,7 @@ export default function MileageTracker() {
                     onChange={(e) => setStopPurpose(i, e.target.value)}
                   />
                 </div>
-                <button onClick={() => removeStopField(i)} className="p-1.5 rounded hover:bg-stone-100 shrink-0 mt-1" style={{ color: TIDE }} title="Remove stop">
+                <button onClick={() => removeStopField(i)} className="p-2.5 rounded hover:bg-stone-100 shrink-0 mt-1" style={{ color: TIDE }} title="Remove stop">
                   <Trash2 size={14} />
                 </button>
               </div>
@@ -563,7 +563,7 @@ export default function MileageTracker() {
         {result && (
           <section className="bg-white rounded-lg overflow-hidden border-l-4" style={{ borderColor: "#C8B89A" }}>
             <div className="flex items-center justify-between gap-3 px-4 py-2.5" style={{ background: MIST }}>
-              <span className="font-mono text-xs" style={{ color: "#4a5a60" }}>{result.date}</span>
+              <span className="font-mono text-xs" style={{ color: "#343e41" }}>{result.date}</span>
               <span className="flex items-center gap-2">
                 <span className="font-mono text-sm font-bold px-2.5 py-1 rounded text-white" style={{ background: SEA }}>
                   {result.totalMiles.toFixed(1)} mi
@@ -577,9 +577,9 @@ export default function MileageTracker() {
               <tbody>
                 {result.legs.map((l, i) => (
                   <tr key={i} className="border-t align-top" style={{ borderColor: "#eee9e2" }}>
-                    <td className="px-4 py-2" style={{ color: "#4a5a60" }}>{i + 1}. {l.from}</td>
-                    <td className="px-1 py-2" style={{ color: "#8b9a9f" }}>→</td>
-                    <td className="px-2 py-2" style={{ color: "#4a5a60" }}>
+                    <td className="px-4 py-2" style={{ color: "#343e41" }}>{i + 1}. {l.from}</td>
+                    <td className="px-1 py-2" style={{ color: "#5f6e74" }}>→</td>
+                    <td className="px-2 py-2" style={{ color: "#343e41" }}>
                       {l.purpose && (
                         <div className="text-[12px] font-semibold leading-tight mb-0.5" style={{ color: SEA }}>
                           {l.purpose}
@@ -588,7 +588,7 @@ export default function MileageTracker() {
                       {l.to}
                     </td>
                     <td className="px-2 py-2 text-right font-mono font-medium whitespace-nowrap">{l.miles.toFixed(1)} mi</td>
-                    <td className="px-4 py-2 text-right font-mono whitespace-nowrap" style={{ color: "#8b9a9f" }}>{l.minutes}m</td>
+                    <td className="px-4 py-2 text-right font-mono whitespace-nowrap" style={{ color: "#5f6e74" }}>{l.minutes}m</td>
                   </tr>
                 ))}
               </tbody>
@@ -609,7 +609,7 @@ export default function MileageTracker() {
 
         {/* Log — its own page; the entry side stays focused on building trips */}
         {subTab === "log" && (trips || []).length === 0 && (
-          <section className="text-sm text-center py-10 rounded bg-white" style={{ color: "#8b9a9f", border: "1px dashed #e5e0d8" }}>
+          <section className="text-sm text-center py-10 rounded bg-white" style={{ color: "#5f6e74", border: "1px dashed #e5e0d8" }}>
             No saved trips yet — build one on the Trip entry page and it lands here.
           </section>
         )}
@@ -662,13 +662,13 @@ export default function MileageTracker() {
               Build from log
             </button>
           </div>
-          <div className="font-mono text-[11px] mt-2 leading-relaxed" style={{ color: "#8b9a9f" }}>
+          <div className="font-mono text-[11px] mt-2 leading-relaxed" style={{ color: "#5f6e74" }}>
             <b>Pull & calculate</b> scans your Outlook calendar for the range (max one month), keeps
             days already in the log as-is, and route-calculates the rest.{" "}
             <b>Build from log</b> skips the calendar and lets you pick straight from logged trips —
             useful when you've entered everything by hand.
           </div>
-          {repMsg && <div className="font-mono text-[12px] mt-2" style={{ color: "#4a5a60" }}>{repMsg}</div>}
+          {repMsg && <div className="font-mono text-[12px] mt-2" style={{ color: "#343e41" }}>{repMsg}</div>}
         </section>
 
         {repData && (
@@ -676,7 +676,7 @@ export default function MileageTracker() {
             <div className="font-mono text-xs uppercase tracking-widest mb-1" style={{ color: SEA }}>
               {repData.days.length > 0 ? "Preview" : "Report contents"}
             </div>
-            <div className="text-[13px] mb-3" style={{ color: "#4a5a60" }}>
+            <div className="text-[13px] mb-3" style={{ color: "#343e41" }}>
               {repData.days.length > 0
                 ? "Uncheck any day you don't want in the report."
                 : "Pick logged days below with “Add from log”, then generate the spreadsheet."}
@@ -729,11 +729,11 @@ export default function MileageTracker() {
                       <ul>
                         {repLegs(d).map((l, i) => (
                           <li key={i} className="starbot-wrap flex items-baseline justify-between gap-3 px-3 py-1 border-t bg-white text-[12px]" style={{ borderColor: "#eee9e2" }}>
-                            <span className="min-w-0" style={{ color: "#4a5a60" }}>
+                            <span className="min-w-0" style={{ color: "#343e41" }}>
                               {l.purpose ? <span className="font-semibold">{l.purpose}</span> : null}
                               {l.purpose ? " · " : ""}{l.to}
                             </span>
-                            <span className="font-mono shrink-0" style={{ color: "#8b9a9f" }}>{l.miles.toFixed(1)} mi</span>
+                            <span className="font-mono shrink-0" style={{ color: "#5f6e74" }}>{l.miles.toFixed(1)} mi</span>
                           </li>
                         ))}
                       </ul>
@@ -744,11 +744,11 @@ export default function MileageTracker() {
             </div>
             {repAddOpen && (
               <div className="rounded p-3 mt-4" style={{ background: MIST, border: "1px solid #e5e0d8" }}>
-                <div className="font-mono text-[10px] uppercase tracking-widest mb-2" style={{ color: "#4a5a60" }}>
+                <div className="font-mono text-[10px] uppercase tracking-widest mb-2" style={{ color: "#343e41" }}>
                   Logged trips not in this report — click to add
                 </div>
                 {logCandidates.length === 0 ? (
-                  <div className="text-[12px]" style={{ color: "#8b9a9f" }}>
+                  <div className="text-[12px]" style={{ color: "#5f6e74" }}>
                     Every logged trip is already covered by this report.
                   </div>
                 ) : (
@@ -762,7 +762,7 @@ export default function MileageTracker() {
                           title="Add this day to the report"
                         >
                           <span className="font-mono text-[12px] font-bold shrink-0">{dayName(date)} {date}</span>
-                          <span className="text-[12px] truncate flex-1 min-w-0" style={{ color: "#4a5a60" }}>
+                          <span className="text-[12px] truncate flex-1 min-w-0" style={{ color: "#343e41" }}>
                             {dayTrips.map((t) => stopsOf(t)).flat().slice(0, 3).join(" · ")}
                           </span>
                           <span className="font-mono text-[12px] shrink-0">
@@ -829,12 +829,12 @@ export default function MileageTracker() {
                       >
                         <span className="font-mono text-xs font-bold shrink-0">{t.date}</span>
                         {!open && (
-                          <span className="text-[13px] truncate min-w-0" style={{ color: "#4a5a60" }}>
+                          <span className="text-[13px] truncate min-w-0" style={{ color: "#343e41" }}>
                             {tripStops.length} stop{tripStops.length === 1 ? "" : "s"}: {tripStops.slice(0, 3).join(" · ")}{tripStops.length > 3 ? " …" : ""}
                           </span>
                         )}
                         {open && (
-                          <span className="text-[13px]" style={{ color: "#8b9a9f" }}>
+                          <span className="text-[13px]" style={{ color: "#5f6e74" }}>
                             {tripStops.length} stop{tripStops.length === 1 ? "" : "s"}
                           </span>
                         )}
@@ -842,18 +842,18 @@ export default function MileageTracker() {
                       <span className="flex items-center gap-3 shrink-0 ml-auto">
                         <span className="font-mono text-[13px] font-medium">{t.totalMiles.toFixed(1)} mi</span>
                         <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(t.dollars)}</span>
-                        <span className="font-mono text-[11px]" style={{ color: "#8b9a9f" }}>@ {fmtRate(t.rate)}</span>
-                        <button onClick={() => toggleExpanded(t.id)} className="p-1 rounded hover:bg-stone-100" style={{ color: INK }} title={open ? "Collapse" : "Expand addresses"}>
+                        <span className="font-mono text-[11px]" style={{ color: "#5f6e74" }}>@ {fmtRate(t.rate)}</span>
+                        <button onClick={() => toggleExpanded(t.id)} className="p-2 rounded hover:bg-stone-100" style={{ color: INK }} title={open ? "Collapse" : "Expand addresses"}>
                           {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                         </button>
-                        <button onClick={() => removeTrip(t)} className="p-1 rounded hover-reveal hover:bg-stone-100" style={{ color: TIDE }} title="Delete entry">
+                        <button onClick={() => removeTrip(t)} className="p-2 rounded hover-reveal hover:bg-stone-100" style={{ color: TIDE }} title="Delete entry">
                           <Trash2 size={13} />
                         </button>
                       </span>
                     </div>
                     {open && (
                       <div className="starbot-wrap mt-2 pt-2 space-y-1 border-t" style={{ borderColor: "#eee9e2" }}>
-                        <div className="text-[12px]" style={{ color: "#8b9a9f" }}>
+                        <div className="text-[12px]" style={{ color: "#5f6e74" }}>
                           Start: {t.legs[0]?.from}
                         </div>
                         {t.legs.map((l, i) => (
@@ -871,9 +871,9 @@ export default function MileageTracker() {
                                 </div>
                               )}
                               {/* i past the stop count = the drive back to start */}
-                              <span style={{ color: "#4a5a60" }}>{i + 1}. {l.to}{i >= tripStops.length ? " (return)" : ""}</span>
+                              <span style={{ color: "#343e41" }}>{i + 1}. {l.to}{i >= tripStops.length ? " (return)" : ""}</span>
                             </div>
-                            <span className="font-mono text-[12px] shrink-0" style={{ color: "#8b9a9f" }}>
+                            <span className="font-mono text-[12px] shrink-0" style={{ color: "#5f6e74" }}>
                               {l.miles.toFixed(1)} mi · {l.minutes}m
                             </span>
                           </div>
@@ -884,7 +884,7 @@ export default function MileageTracker() {
                 );
               })}
             </div>
-            <div className="font-mono text-[11px] mt-2" style={{ color: "#8b9a9f" }}>
+            <div className="font-mono text-[11px] mt-2" style={{ color: "#5f6e74" }}>
               Each entry keeps the rate it was saved with — set the rate in the trip form before calculating.
             </div>
           </section>
@@ -902,7 +902,7 @@ export default function MileageTracker() {
         <div className="rounded p-3 mb-3" style={{ background: MIST }}>
           <div className="flex items-center gap-1.5 mb-2">
             <Calendar size={13} style={{ color: SEA }} />
-            <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: "#4a5a60" }}>
+            <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: INK }}>
               Pull from my calendar
             </span>
           </div>
@@ -913,14 +913,14 @@ export default function MileageTracker() {
           <button onClick={scan} disabled={scanBusy} className="w-full py-1.5 rounded text-white text-xs font-medium disabled:opacity-60" style={{ background: INK }}>
             {scanBusy ? "Scanning…" : "Scan events for addresses"}
           </button>
-          {scanMsg && <div className="font-mono text-[11px] mt-2" style={{ color: "#4a5a60" }}>{scanMsg}</div>}
+          {scanMsg && <div className="font-mono text-[11px] mt-2" style={{ color: "#343e41" }}>{scanMsg}</div>}
         </div>
 
         {/* Day groups: what the scan day-stamped. "Load day" rebuilds that
             day's route in the trip form — date included. */}
         {visitDays.length > 0 && (
           <div className="mb-3">
-            <div className="font-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "#4a5a60" }}>
+            <div className="font-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "#343e41" }}>
               Scanned days
             </div>
             <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
@@ -942,7 +942,7 @@ export default function MileageTracker() {
                       <li key={v.id} className="group flex items-start gap-1 px-2 py-1 border-t bg-white" style={{ borderColor: "#eee9e2" }}>
                         <button onClick={() => useAsStop(v.address)} className="starbot-wrap flex-1 min-w-0 text-left" title="Add as next stop">
                           {v.label && <span className="block text-[11px] font-semibold leading-snug">{v.label}</span>}
-                          <span className="block text-[11px] leading-snug" style={{ color: "#4a5a60" }}>{v.address}</span>
+                          <span className="block text-[11px] leading-snug" style={{ color: "#343e41" }}>{v.address}</span>
                         </button>
                         <button onClick={() => removeVisit(v)} className="p-0.5 mt-0.5 rounded hover-reveal hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Remove this stop from this day">
                           <Trash2 size={11} />
@@ -957,7 +957,7 @@ export default function MileageTracker() {
         )}
 
         {places.length > 0 && (
-          <div className="font-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "#4a5a60" }}>
+          <div className="font-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "#343e41" }}>
             Address book
           </div>
         )}
@@ -972,8 +972,8 @@ export default function MileageTracker() {
                   title="Add as next stop"
                 >
                   {p.label && <div className="text-[13px] font-semibold leading-snug">{p.label}</div>}
-                  <div className="text-[12px] leading-snug" style={{ color: "#4a5a60" }}>{p.address}</div>
-                  <div className="font-mono text-[10px] mt-0.5" style={{ color: "#8b9a9f" }}>
+                  <div className="text-[12px] leading-snug" style={{ color: "#343e41" }}>{p.address}</div>
+                  <div className="font-mono text-[10px] mt-0.5" style={{ color: "#5f6e74" }}>
                     {newIds.has(p.id) && <span className="font-bold mr-1.5" style={{ color: SEA }}>NEW</span>}
                     {p.timesUsed > 0 && `${p.timesUsed}× used`}
                     {p.timesUsed > 0 && p.lastUsed && " · "}
@@ -981,19 +981,19 @@ export default function MileageTracker() {
                     {!p.timesUsed && !p.lastUsed && p.source === "calendar" && "from calendar"}
                   </div>
                 </button>
-                <button onClick={() => removePlace(p)} className="p-1 mt-1 rounded hover-reveal hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Delete place">
+                <button onClick={() => removePlace(p)} className="p-2 mt-1 rounded hover-reveal hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Delete place">
                   <Trash2 size={12} />
                 </button>
               </div>
             </li>
           ))}
           {places.length === 0 && (
-            <li className="text-xs text-center py-6 rounded" style={{ color: "#8b9a9f", border: "1px dashed #e5e0d8" }}>
+            <li className="text-xs text-center py-6 rounded" style={{ color: "#5f6e74", border: "1px dashed #e5e0d8" }}>
               No saved places yet. Scan your calendar above, or save a trip — its stops land here.
             </li>
           )}
         </ul>
-        <div className="font-mono text-[10px] mt-3 leading-relaxed" style={{ color: "#8b9a9f" }}>
+        <div className="font-mono text-[10px] mt-3 leading-relaxed" style={{ color: "#5f6e74" }}>
           Click a place to add it as a stop. Stop fields also autocomplete from this list.
         </div>
       </aside>

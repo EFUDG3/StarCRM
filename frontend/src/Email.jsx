@@ -38,7 +38,7 @@ const LANES = [
   },
   {
     key: "cleanup", label: "Cleanup candidates",
-    bg: "#ece7df", fg: "#6b7a80", open: false,
+    bg: "#ece7df", fg: "#55646a", open: false,
     empty: "No bulk mail detected.",
     note: "Newsletters and notifications the filter caught. Reviewing and moving these to trash arrives in a later update.",
   },
@@ -100,7 +100,7 @@ const CATEGORY = {
   customer: { label: "Customer", bg: "rgba(47,93,80,.16)", fg: "#2b6a58" },
   vendor: { label: "Vendor", bg: "rgba(140,109,70,.16)", fg: "#8C6D46" },
   internal: { label: "Internal", bg: "rgba(62,76,89,.14)", fg: "#3E4C59" },
-  notification: { label: "Notification", bg: "#ece7df", fg: "#8b9a9f" },
+  notification: { label: "Notification", bg: "#ece7df", fg: "#5f6e74" },
   other: { label: "", bg: "", fg: "" },
 };
 
@@ -223,7 +223,7 @@ export default function EmailTab() {
       <section className="bg-white rounded-lg p-8 text-center border-l-4 max-w-lg mx-auto mt-8" style={{ borderColor: SEA }}>
         <Inbox size={28} style={{ color: SEA }} className="mx-auto mb-3" />
         <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "Georgia, serif" }}>Star Mail</h2>
-        <p className="text-[15px] mb-5" style={{ color: "#4a5a60" }}>
+        <p className="text-[15px] mb-5" style={{ color: "#343e41" }}>
           Your inbox, ranked — what needs you, what's waiting on them, and what can go.
           Sign in with your Star account.
         </p>
@@ -423,7 +423,7 @@ export default function EmailTab() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="relative flex-1 min-w-56">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#8b9a9f" }} />
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#5f6e74" }} />
           <input value={query} onChange={(e) => setQuery(e.target.value)}
             placeholder="Search sender, subject, snippet, folder"
             className="w-full bg-white border rounded pl-9 pr-3 py-2 text-sm"
@@ -436,7 +436,7 @@ export default function EmailTab() {
           {syncing ? "Scanning…" : "Refresh"}
         </button>
         {data?.lastSync && !syncing && (
-          <span className="font-mono text-xs shrink-0" style={{ color: "#8b9a9f" }}>Updated {fmtTime(data.lastSync)}</span>
+          <span className="font-mono text-xs shrink-0" style={{ color: "#5f6e74" }}>Updated {fmtTime(data.lastSync)}</span>
         )}
         {error && <span className="text-xs" style={{ color: TIDE }}>{error}</span>}
 
@@ -446,10 +446,10 @@ export default function EmailTab() {
             most need people to trust — so there is nothing to flip yet.
             Restore the switch (toggleDigest + user_prefs.digest_enabled are
             both still wired) the day sending goes live. */}
-        <span className="flex items-center gap-2 ml-auto text-xs" style={{ color: "#b0b8ba" }}>
+        <span className="flex items-center gap-2 ml-auto text-xs" style={{ color: "#6f7d82" }}>
           Daily digest email
           <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded"
-            style={{ background: MIST, color: "#8b9a9f" }}>coming soon</span>
+            style={{ background: MIST, color: "#5f6e74" }}>coming soon</span>
         </span>
       </div>
 
@@ -463,7 +463,7 @@ export default function EmailTab() {
               style={filter === f.key ? { background: INK, color: "white" } : { background: "white", color: INK }}>
               {f.label}
               <span className="font-mono text-[10px] tabular-nums"
-                style={{ color: filter === f.key ? "rgba(255,255,255,.75)" : "#8b9a9f" }}>{f.n}</span>
+                style={{ color: filter === f.key ? "rgba(255,255,255,.75)" : "#5f6e74" }}>{f.n}</span>
             </button>
           ))}
         </div>
@@ -478,7 +478,7 @@ export default function EmailTab() {
           <SlidersHorizontal size={13} /> Triage rules
         </button>
         <div className="flex items-center gap-1" hidden={filter === "rules"}>
-          <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: "#8b9a9f" }}>Sort</span>
+          <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: "#5f6e74" }}>Sort</span>
           <div className="flex gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid " + BORDER }}>
             {[
               { k: "importance", label: "Importance" },
@@ -496,7 +496,7 @@ export default function EmailTab() {
       </div>
 
       {/* Counts line — split "handled" into its two real meanings. */}
-      <div className="text-xs mb-4 flex items-center gap-3 flex-wrap" style={{ color: "#8b9a9f" }}
+      <div className="text-xs mb-4 flex items-center gap-3 flex-wrap" style={{ color: "#5f6e74" }}
         hidden={filter === "rules"}>
         <span>
           {filteredNeed === 0 ? "Nothing needs your reply" : `${filteredNeed} thread${filteredNeed === 1 ? "" : "s"} need${filteredNeed === 1 ? "s" : ""} your reply`}
@@ -517,7 +517,7 @@ export default function EmailTab() {
       </div>
 
       {firstScan && (
-        <div className="rounded-lg border p-4 mb-4 text-sm" style={{ borderColor: BORDER, background: "white", color: "#4a5a60" }}>
+        <div className="rounded-lg border p-4 mb-4 text-sm" style={{ borderColor: BORDER, background: "white", color: "#343e41" }}>
           <span className="font-medium" style={{ color: INK }}>First scan of your mailbox.</span>{" "}
           Reading the last 30 days and sorting the threads — this one takes about a minute.
           Every refresh after this is incremental and quick.
@@ -546,7 +546,7 @@ export default function EmailTab() {
       {/* Shown once, until the user's first correction. */}
       {!taught && filter !== "rules" && !firstScan && (
         <div className="rounded-lg border p-3 mb-3 flex items-start gap-2 text-sm"
-          style={{ borderColor: BORDER, background: "white", color: "#4a5a60" }}>
+          style={{ borderColor: BORDER, background: "white", color: "#343e41" }}>
           <CornerUpRight size={15} className="mt-0.5 shrink-0" style={{ color: SEA }} />
           <div className="flex-1">
             <span className="font-medium" style={{ color: INK }}>Something in the wrong lane?</span>{" "}
@@ -557,7 +557,7 @@ export default function EmailTab() {
           <button onClick={() => {
             setTaught(true);
             try { localStorage.setItem(TAUGHT_KEY, "1"); } catch { /* ignore */ }
-          }} className="p-1 rounded hover:bg-stone-100 shrink-0" style={{ color: "#8b9a9f" }}
+          }} className="p-2 rounded hover:bg-stone-100 shrink-0" style={{ color: "#5f6e74" }}
             title="Got it">
             <X size={14} />
           </button>
@@ -578,7 +578,7 @@ export default function EmailTab() {
           {suggested.map((s) => (
             <div key={s.id} className="mb-2 last:mb-0">
               <div className="text-sm font-medium" style={{ color: INK }}>{s.describe}</div>
-              <div className="text-xs mb-1.5" style={{ color: "#8b9a9f" }}>{s.rationale}</div>
+              <div className="text-xs mb-1.5" style={{ color: "#5f6e74" }}>{s.rationale}</div>
               <div className="flex items-center gap-2">
                 <button onClick={() => acceptSuggestion(s.id)}
                   className="flex items-center gap-1.5 px-3 py-1 rounded text-white text-xs font-medium"
@@ -587,7 +587,7 @@ export default function EmailTab() {
                 </button>
                 <button onClick={() => rejectSuggestion(s.id)}
                   className="px-3 py-1 rounded text-xs font-medium border bg-white"
-                  style={{ borderColor: BORDER, color: "#4a5a60" }}>
+                  style={{ borderColor: BORDER, color: "#343e41" }}>
                   Not quite
                 </button>
               </div>
@@ -610,19 +610,19 @@ export default function EmailTab() {
                 <button onClick={() => toggleLane(lane.key)}
                   className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-stone-50"
                   style={{ borderBottom: isCollapsed ? "none" : "1px solid " + ROW_LINE }}>
-                  {isCollapsed ? <ChevronRight size={15} style={{ color: "#8b9a9f" }} /> : <ChevronDown size={15} style={{ color: "#8b9a9f" }} />}
+                  {isCollapsed ? <ChevronRight size={15} style={{ color: "#5f6e74" }} /> : <ChevronDown size={15} style={{ color: "#5f6e74" }} />}
                   <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
                     style={{ background: lane.bg, color: lane.fg }}>{lane.label}</span>
-                  <span className="font-mono text-xs tabular-nums" style={{ color: "#8b9a9f" }}>{lane.rows.length}</span>
+                  <span className="font-mono text-xs tabular-nums" style={{ color: "#5f6e74" }}>{lane.rows.length}</span>
                 </button>
 
                 {!isCollapsed && (
                   <>
                     {lane.note && lane.rows.length > 0 && (
-                      <div className="px-3 pt-2 text-[11px]" style={{ color: "#b0b8ba" }}>{lane.note}</div>
+                      <div className="px-3 pt-2 text-[11px]" style={{ color: "#6f7d82" }}>{lane.note}</div>
                     )}
                     {lane.rows.length === 0 ? (
-                      <div className="px-3 py-6 text-sm text-center" style={{ color: "#b0b8ba" }}>
+                      <div className="px-3 py-6 text-sm text-center" style={{ color: "#6f7d82" }}>
                         {q ? "No matches in this lane." : lane.empty}
                       </div>
                     ) : (
@@ -662,12 +662,12 @@ export default function EmailTab() {
           return (
             <section className="bg-white rounded-lg border overflow-hidden" style={{ borderColor: BORDER }}>
               {active?.note && (
-                <div className="px-3 py-2 text-[11px]" style={{ color: "#b0b8ba", borderBottom: "1px solid " + ROW_LINE }}>
+                <div className="px-3 py-2 text-[11px]" style={{ color: "#6f7d82", borderBottom: "1px solid " + ROW_LINE }}>
                   {active.note}
                 </div>
               )}
               {flatRows.length === 0 ? (
-                <div className="px-3 py-8 text-sm text-center" style={{ color: "#b0b8ba" }}>
+                <div className="px-3 py-8 text-sm text-center" style={{ color: "#6f7d82" }}>
                   {q ? `No ${active?.label?.toLowerCase() || ""} threads match "${query}".` : active?.empty}
                 </div>
               ) : (
@@ -768,7 +768,7 @@ function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove }
                 />
               )}
               {t.outboundOnly && (
-                <ArrowRight size={11} style={{ color: "#8b9a9f" }} title="You started this thread" />
+                <ArrowRight size={11} style={{ color: "#5f6e74" }} title="You started this thread" />
               )}
               <span className="font-semibold text-sm break-words" style={{ color: INK }}>
                 {t.senderName || "(no recipient)"}
@@ -785,14 +785,14 @@ function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove }
                   style={{ background: cat.bg, color: cat.fg }}>{cat.label}</span>
               )}
               {t.msgCount > 1 && (
-                <span className="font-mono text-[10px]" style={{ color: "#b0b8ba" }}>{t.msgCount} msgs</span>
+                <span className="font-mono text-[10px]" style={{ color: "#6f7d82" }}>{t.msgCount} msgs</span>
               )}
             </div>
-            <div className="text-sm mt-0.5 break-words" style={{ color: "#4a5a60", maxWidth: "44rem" }}>
+            <div className="text-sm mt-0.5 break-words" style={{ color: "#343e41", maxWidth: "44rem" }}>
               {t.subject}
             </div>
             {t.snippet && (
-              <div className="text-xs mt-0.5 truncate" style={{ color: "#8b9a9f", maxWidth: "44rem" }}>
+              <div className="text-xs mt-0.5 truncate" style={{ color: "#5f6e74", maxWidth: "44rem" }}>
                 {t.snippet}
               </div>
             )}
@@ -806,32 +806,32 @@ function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove }
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-auto pt-0.5">
             {t.folder && t.folder.toLowerCase() !== "inbox" && (
-              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ background: MIST, color: "#6b7a80" }}>{t.folder}</span>
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ background: MIST, color: "#55646a" }}>{t.folder}</span>
             )}
-            <span className="font-mono text-[11px] tabular-nums" style={{ color: "#8b9a9f" }}>{ageOf(t.lastAt)}</span>
-            {hasLink && <ExternalLink size={12} style={{ color: "#b0b8ba" }} />}
+            <span className="font-mono text-[11px] tabular-nums" style={{ color: "#5f6e74" }}>{ageOf(t.lastAt)}</span>
+            {hasLink && <ExternalLink size={12} style={{ color: "#6f7d82" }} />}
             {onMove && (
               // Labelled, not a bare icon. A correction nobody can find
               // produces no data, and this control IS the feedback loop —
               // discoverability is the feature here, not decoration.
               <button onClick={(e) => { stop(e); setMenu((v) => !v); }}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase hover:bg-stone-200"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded text-[10px] font-mono uppercase hover:bg-stone-200"
                 title="Wrong lane? Move it — the triage learns from this"
-                style={{ color: menu ? SEA : "#8b9a9f" }}>
+                style={{ color: menu ? SEA : "#5f6e74" }}>
                 <CornerUpRight size={11} /> Move
               </button>
             )}
             {onDismiss && (
               <button onClick={(e) => { stop(e); onDismiss(); }}
-                className="p-1 rounded hover:bg-stone-200"
+                className="p-2 rounded hover:bg-stone-200"
                 title="Not a task — hide this thread"
-                style={{ color: "#8b9a9f" }}>
+                style={{ color: "#5f6e74" }}>
                 <X size={13} />
               </button>
             )}
             {onUndismiss && (
               <button onClick={(e) => { stop(e); onUndismiss(); }}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase hover:bg-stone-200"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded text-[10px] font-mono uppercase hover:bg-stone-200"
                 title="Restore to its lane"
                 style={{ color: SEA }}>
                 <Undo2 size={11} /> Restore
@@ -848,7 +848,7 @@ function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove }
         {menu && onMove && (
           <div onClick={stop} className="mt-2 rounded border p-2"
             style={{ borderColor: BORDER, background: MIST }}>
-            <div className="font-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "#8b9a9f" }}>
+            <div className="font-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "#5f6e74" }}>
               Where does this belong?
             </div>
             <div className="flex flex-wrap gap-1 mb-2">
@@ -861,7 +861,7 @@ function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove }
                 </button>
               ))}
             </div>
-            <div className="font-mono text-[10px] uppercase tracking-widest mb-1" style={{ color: "#b0b8ba" }}>
+            <div className="font-mono text-[10px] uppercase tracking-widest mb-1" style={{ color: "#6f7d82" }}>
               Why? (optional)
             </div>
             <div className="flex flex-wrap gap-1">
@@ -870,7 +870,7 @@ function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove }
                   className="px-2 py-0.5 rounded-full text-[11px] border"
                   style={why === c.k
                     ? { background: SEA, color: "white", borderColor: SEA }
-                    : { background: "white", color: "#4a5a60", borderColor: BORDER }}>
+                    : { background: "white", color: "#343e41", borderColor: BORDER }}>
                   {c.label}
                 </button>
               ))}

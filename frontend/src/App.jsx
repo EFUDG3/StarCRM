@@ -14,7 +14,8 @@ import EmailTab from "./Email.jsx";
 // ---------- Brand tokens ----------
 // Star brand: red #922525, black, white, with warm supporting neutrals.
 const INK = "#1C1C1C";   // near-black charcoal — body text, dark buttons, rule line
-const MIST = "#F3F0EC";  // warm paper — page + chip backgrounds
+const MIST = "#F3F0EC";  // warm paper — chip/panel backgrounds inside white cards
+const PAGE_BG = "#EBE6E0"; // ~4pt darker than MIST — page canvas only, so white cards/chips pop more (2026-09-11, local-only)
 const SEA = "#922525";   // Star brand red — primary accent (labels, links, icons)
 const TIDE = "#C0392B";  // brighter alert red — overdue / urgent
 const SAND = "#C8B89A";  // warm sand — soft borders / non-urgent accents
@@ -341,7 +342,7 @@ export default function StarCRM() {
 
   if (me === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: MIST }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: PAGE_BG }}>
         <div className="font-mono text-sm tracking-widest uppercase" style={{ color: SEA }}>Checking sign-in…</div>
       </div>
     );
@@ -351,14 +352,14 @@ export default function StarCRM() {
   // the URL see only this card; sign-in requires a Star tenant account.
   if (me.configured && !me.signedIn) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: MIST, color: INK }}>
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: PAGE_BG, color: INK }}>
         <section className="bg-white rounded-lg p-10 text-center border-l-4 max-w-md w-full shadow-sm" style={{ borderColor: SEA }}>
           <div className="text-5xl mb-3" style={{ color: SEA }}>★</div>
           <h1 className="text-3xl font-bold tracking-tight mb-1" style={{ fontFamily: "Georgia, serif" }}>Starbot</h1>
           <div className="font-mono text-xs tracking-[0.25em] uppercase mb-5" style={{ color: SEA }}>
             Star Flooring &amp; Remodeling
           </div>
-          <p className="text-[15px] mb-6" style={{ color: "#4a5a60" }}>
+          <p className="text-[15px] mb-6" style={{ color: "#343e41" }}>
             The internal assistant for the Star team: email triage, task boards,
             and the relationship CRM. Sign in with your company account.
           </p>
@@ -375,7 +376,7 @@ export default function StarCRM() {
             </svg>
             Sign in with Microsoft
           </a>
-          <div className="font-mono text-[11px] mt-5" style={{ color: "#8b9a9f" }}>
+          <div className="font-mono text-[11px] mt-5" style={{ color: "#5f6e74" }}>
             Star Flooring company accounts only
           </div>
         </section>
@@ -385,17 +386,17 @@ export default function StarCRM() {
 
   if (!contacts && view === "board") {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: MIST }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: PAGE_BG }}>
         <div className="font-mono text-sm tracking-widest uppercase" style={{ color: SEA }}>Loading contacts…</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen" style={{ background: MIST, color: INK }}>
+    <div className="min-h-screen" style={{ background: PAGE_BG, color: INK }}>
       {/* All tabs share one container width so the page boundaries don't jump
           when switching views (board previously kept a tighter column). */}
-      <div className="max-w-5xl lg:max-w-[calc(64rem+(100vw-64rem)/2)] mx-auto px-4 py-6">
+      <div className="max-w-[70.25rem] lg:max-w-[calc(70.25rem+(100vw-70.25rem)/2)] mx-auto px-4 py-6">
 
         {/* Header */}
         <header className="mb-6 border-b-2 pb-4" style={{ borderColor: INK }}>
@@ -415,7 +416,7 @@ export default function StarCRM() {
                 <span className="font-mono text-xs" style={{ color: saveState === "error" ? TIDE : SEA }}>
                   {saveState === "saving" ? "saving…" : saveState === "saved" ? "saved ✓" : saveState === "error" ? "save failed" : ""}
                 </span>
-                <button onClick={resetData} title="Reset data" className="p-2 rounded hover:bg-white" style={{ color: INK }}>
+                <button onClick={resetData} title="Reset data" className="p-3 rounded hover:bg-white" style={{ color: INK }}>
                   <RotateCcw size={16} />
                 </button>
                 <input ref={cardInputRef} type="file" accept="image/*" onChange={handleScanFile} className="hidden" />
@@ -538,8 +539,8 @@ export default function StarCRM() {
                   <Clock size={15} className="mt-1 shrink-0" style={{ color: c.overdue || c.today ? TIDE : SEA }} />
                   <div className="min-w-0">
                     <div className="font-semibold truncate">{c.name}</div>
-                    <div className="text-sm truncate" style={{ color: "#4a5a60" }}>{c.nextAction}</div>
-                    <div className="font-mono text-xs mt-1 font-medium" style={{ color: c.overdue ? TIDE : "#6b7a80" }}>
+                    <div className="text-sm truncate" style={{ color: "#343e41" }}>{c.nextAction}</div>
+                    <div className="font-mono text-xs mt-1 font-medium" style={{ color: c.overdue ? TIDE : "#55646a" }}>
                       {c.overdue ? "overdue · " : c.today ? "today · " : "due "}{c.nextDue}
                     </div>
                   </div>
@@ -562,23 +563,23 @@ export default function StarCRM() {
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
                 <h2 className="text-2xl font-bold" style={{ fontFamily: "Georgia, serif" }}>{selected.name}</h2>
-                <div className="text-sm" style={{ color: "#4a5a60" }}>{selected.company}{selected.role ? " · " + selected.role : ""}</div>
+                <div className="text-sm" style={{ color: "#343e41" }}>{selected.company}{selected.role ? " · " + selected.role : ""}</div>
                 {selected.created && (
-                  <div className="font-mono text-[11px] mt-1" style={{ color: "#8b9a9f" }}>Added {fmtDate(selected.created)}</div>
+                  <div className="font-mono text-[11px] mt-1" style={{ color: "#5f6e74" }}>Added {fmtDate(selected.created)}</div>
                 )}
                 <div className="flex gap-3 mt-2 flex-wrap">
                   {selected.email && <a href={"mailto:" + selected.email} className="flex items-center gap-1 text-sm underline" style={{ color: SEA }}><Mail size={14} />{selected.email}</a>}
                   {(selected.phones || []).map((p, i) => (
                     <span key={i} className="flex items-center gap-1 text-sm">
                       <Phone size={14} style={{ color: SEA }} />{p.number}
-                      {p.type ? <span className="text-xs" style={{ color: "#8b9a9f" }}>· {p.type.charAt(0).toUpperCase() + p.type.slice(1)}</span> : null}
+                      {p.type ? <span className="text-xs" style={{ color: "#5f6e74" }}>· {p.type.charAt(0).toUpperCase() + p.type.slice(1)}</span> : null}
                     </span>
                   ))}
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => setEditing({ ...selected })} className="p-2 rounded hover:bg-stone-100"><Pencil size={16} /></button>
-                <button onClick={() => deleteContact(selected.id)} className="p-2 rounded hover:bg-stone-100" style={{ color: TIDE }}><Trash2 size={16} /></button>
+                <button onClick={() => setEditing({ ...selected })} className="p-3 rounded hover:bg-stone-100"><Pencil size={16} /></button>
+                <button onClick={() => deleteContact(selected.id)} className="p-3 rounded hover:bg-stone-100" style={{ color: TIDE }}><Trash2 size={16} /></button>
               </div>
             </div>
 
@@ -616,7 +617,7 @@ export default function StarCRM() {
                     <span>{l.note}</span>
                   </li>
                 ))}
-                {selected.log.length === 0 && <li className="text-sm" style={{ color: "#8b9a9f" }}>No notes yet. Add the first one above.</li>}
+                {selected.log.length === 0 && <li className="text-sm" style={{ color: "#5f6e74" }}>No notes yet. Add the first one above.</li>}
               </ul>
             </div>
           </section>
@@ -627,7 +628,7 @@ export default function StarCRM() {
           <>
             <div className="flex gap-2 mb-4 flex-wrap items-center">
               <div className="relative flex-1 min-w-48">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#8b9a9f" }} />
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#5f6e74" }} />
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
@@ -664,7 +665,7 @@ export default function StarCRM() {
                 <thead>
                   <tr style={{ borderBottom: "1px solid #cdd6d4" }}>
                     {["Name", "Company", "Role", "Email", "Phone", "Next action", "Category"].map((h) => (
-                      <th key={h} className="px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-left" style={{ color: "#6b7a80" }}>{h}</th>
+                      <th key={h} className="px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-left" style={{ color: "#55646a" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -676,16 +677,16 @@ export default function StarCRM() {
                         <td className="px-3 py-2.5 align-top" style={{ borderLeft: "3px solid " + catColor(c) }}>
                           <div className="font-semibold break-words" style={{ color: INK, maxWidth: "18rem" }}>{c.name}</div>
                         </td>
-                        <td className="px-3 py-2.5">{c.company ? <div className="truncate" style={{ color: "#4a5a60", maxWidth: "12rem" }}>{c.company}</div> : <span style={{ color: "#b0b8ba" }}>—</span>}</td>
-                        <td className="px-3 py-2.5">{c.role ? <div className="truncate" style={{ color: "#4a5a60", maxWidth: "9rem" }}>{c.role}</div> : <span style={{ color: "#b0b8ba" }}>—</span>}</td>
-                        <td className="px-3 py-2.5">{c.email ? <a href={"mailto:" + c.email} onClick={(e) => e.stopPropagation()} className="underline truncate align-bottom" style={{ color: SEA, maxWidth: "14rem", display: "inline-block" }}>{c.email}</a> : <span style={{ color: "#b0b8ba" }}>—</span>}</td>
-                        <td className="px-3 py-2.5 font-mono text-[12px] whitespace-nowrap" style={{ color: "#4a5a60" }}>
-                          {c.phone ? <>{c.phone}{(c.phones && c.phones.length > 1) ? <span style={{ color: "#b0b8ba" }}> +{c.phones.length - 1}</span> : null}</> : <span style={{ color: "#b0b8ba" }}>—</span>}
+                        <td className="px-3 py-2.5">{c.company ? <div className="truncate" style={{ color: "#343e41", maxWidth: "12rem" }}>{c.company}</div> : <span style={{ color: "#6f7d82" }}>—</span>}</td>
+                        <td className="px-3 py-2.5">{c.role ? <div className="truncate" style={{ color: "#343e41", maxWidth: "9rem" }}>{c.role}</div> : <span style={{ color: "#6f7d82" }}>—</span>}</td>
+                        <td className="px-3 py-2.5">{c.email ? <a href={"mailto:" + c.email} onClick={(e) => e.stopPropagation()} className="underline truncate align-bottom" style={{ color: SEA, maxWidth: "14rem", display: "inline-block" }}>{c.email}</a> : <span style={{ color: "#6f7d82" }}>—</span>}</td>
+                        <td className="px-3 py-2.5 font-mono text-[12px] whitespace-nowrap" style={{ color: "#343e41" }}>
+                          {c.phone ? <>{c.phone}{(c.phones && c.phones.length > 1) ? <span style={{ color: "#6f7d82" }}> +{c.phones.length - 1}</span> : null}</> : <span style={{ color: "#6f7d82" }}>—</span>}
                         </td>
                         <td className="px-3 py-2.5 align-top">
                           {c.nextAction
-                            ? <div className="text-[13px] line-clamp-2" style={{ color: overdue ? TIDE : "#4a5a60", maxWidth: "22rem" }}>{c.nextAction}{c.nextDue ? <span className="font-mono text-[11px]" style={{ color: overdue ? TIDE : "#8b9a9f" }}> ({c.nextDue})</span> : null}</div>
-                            : <span style={{ color: "#b0b8ba" }}>—</span>}
+                            ? <div className="text-[13px] line-clamp-2" style={{ color: overdue ? TIDE : "#343e41", maxWidth: "22rem" }}>{c.nextAction}{c.nextDue ? <span className="font-mono text-[11px]" style={{ color: overdue ? TIDE : "#5f6e74" }}> ({c.nextDue})</span> : null}</div>
+                            : <span style={{ color: "#6f7d82" }}>—</span>}
                         </td>
                         <td className="px-3 py-2.5">
                           <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded whitespace-nowrap" style={{ background: MIST, color: catColor(c) }}>{catLabel(c)}</span>
@@ -694,7 +695,7 @@ export default function StarCRM() {
                     );
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={7} className="text-sm text-center py-8" style={{ color: "#8b9a9f" }}>No contacts match. Clear the search or add a new contact.</td></tr>
+                    <tr><td colSpan={7} className="text-sm text-center py-8" style={{ color: "#5f6e74" }}>No contacts match. Clear the search or add a new contact.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -741,7 +742,7 @@ function ContactForm({ initial, onCancel, onSave }) {
     <section className="bg-white rounded-lg p-5 mb-6 border-l-4" style={{ borderColor: SEA }}>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold" style={{ fontFamily: "Georgia, serif" }}>{form.id ? "Edit contact" : "New contact"}</h2>
-        <button onClick={onCancel} className="p-2 rounded hover:bg-stone-100"><X size={16} /></button>
+        <button onClick={onCancel} className="p-3 rounded hover:bg-stone-100"><X size={16} /></button>
       </div>
       {form.cardImage && (
         <div className="mb-4">
@@ -837,7 +838,7 @@ function UserSwitcher({ users, userId, onSwitch, onAdd, onRename, onDelete }) {
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute left-0 mt-1 w-64 bg-white rounded-lg shadow-lg z-20 py-1" style={{ border: "1px solid #cdd6d4" }}>
-            <div className="font-mono text-[10px] uppercase tracking-widest px-3 py-1.5" style={{ color: "#8b9a9f" }}>Switch user</div>
+            <div className="font-mono text-[10px] uppercase tracking-widest px-3 py-1.5" style={{ color: "#5f6e74" }}>Switch user</div>
             {users.map((u) => (
               <div key={u.id} className="flex items-center group">
                 <button
@@ -847,10 +848,10 @@ function UserSwitcher({ users, userId, onSwitch, onAdd, onRename, onDelete }) {
                   {u.id === userId ? <Check size={14} style={{ color: SEA }} /> : <span style={{ width: 14, display: "inline-block" }} />}
                   <span className="truncate">{u.name}</span>
                 </button>
-                <button onClick={() => onRename(u.id, u.name)} title="Rename" className="p-1.5 hover-reveal hover:bg-stone-100 rounded">
+                <button onClick={() => onRename(u.id, u.name)} title="Rename" className="p-2.5 hover-reveal hover:bg-stone-100 rounded">
                   <Pencil size={13} />
                 </button>
-                <button onClick={() => onDelete(u.id)} title="Delete" className="p-1.5 mr-1 hover-reveal hover:bg-stone-100 rounded" style={{ color: TIDE }}>
+                <button onClick={() => onDelete(u.id)} title="Delete" className="p-2.5 mr-1 hover-reveal hover:bg-stone-100 rounded" style={{ color: TIDE }}>
                   <Trash2 size={13} />
                 </button>
               </div>
@@ -964,7 +965,7 @@ function CardCamera({ onCapture, onClose, onUseFile }) {
           <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest" style={{ color: SEA }}>
             <Camera size={14} /> Scan a card
           </div>
-          <button onClick={cancel} className="p-1.5 rounded hover:bg-stone-100" title="Close"><X size={16} /></button>
+          <button onClick={cancel} className="p-2.5 rounded hover:bg-stone-100" title="Close"><X size={16} /></button>
         </div>
 
         {err ? (
@@ -1018,7 +1019,7 @@ function CardCamera({ onCapture, onClose, onUseFile }) {
         </div>
 
         {!err && !preview && (
-          <div className="text-xs mt-2" style={{ color: "#8b9a9f" }}>
+          <div className="text-xs mt-2" style={{ color: "#5f6e74" }}>
             Hold the card inside the frame, filling as much of it as you can, then Capture.
           </div>
         )}

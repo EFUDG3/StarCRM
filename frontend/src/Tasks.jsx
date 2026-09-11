@@ -109,7 +109,7 @@ export default function TaskBoard() {
       <section className="bg-white rounded-lg p-8 text-center border-l-4 max-w-lg mx-auto mt-8" style={{ borderColor: SEA }}>
         <ListTodo size={28} style={{ color: SEA }} className="mx-auto mb-3" />
         <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "Georgia, serif" }}>Your day</h2>
-        <p className="text-sm mb-5" style={{ color: "#4a5a60" }}>Your meetings, flagged emails, and follow-ups, assembled from your Microsoft account. Sign in to see them.</p>
+        <p className="text-sm mb-5" style={{ color: "#343e41" }}>Your meetings, flagged emails, and follow-ups, assembled from your Microsoft account. Sign in to see them.</p>
         <a href={api.authLoginUrl()} className="inline-flex items-center gap-2 px-5 py-2.5 rounded text-white text-sm font-medium" style={{ background: INK }}>Sign in with Microsoft</a>
       </section>
     );
@@ -180,7 +180,7 @@ export default function TaskBoard() {
       <div className="w-14 shrink-0 font-mono text-[12px] font-bold pt-0.5" style={{ color: MEET }}>{meetTime(m)}</div>
       <div className="min-w-0 flex-1">
         <div className="text-[14px] font-medium break-words">{m.subject || "(no title)"}</div>
-        <div className="flex items-center gap-2 flex-wrap mt-0.5 text-[12px]" style={{ color: "#8b9a9f" }}>
+        <div className="flex items-center gap-2 flex-wrap mt-0.5 text-[12px]" style={{ color: "#5f6e74" }}>
           {m.location && <span className="truncate max-w-[16rem]">{m.location}</span>}
           {m.webLink && <a href={m.webLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline" style={{ color: SEA }}>open</a>}
         </div>
@@ -199,9 +199,9 @@ export default function TaskBoard() {
         {done && <Check size={11} color="white" />}
       </button>
       <div className="min-w-0 flex-1">
-        <div className="text-[15px] leading-snug break-words" style={{ color: done ? "#8b9a9f" : INK, textDecoration: done ? "line-through" : "none" }}>{t.text}</div>
+        <div className="text-[15px] leading-snug break-words" style={{ color: done ? "#5f6e74" : INK, textDecoration: done ? "line-through" : "none" }}>{t.text}</div>
         {(t.due || t.source) && (
-          <div className="starbot-wrap font-mono text-[10px] mt-0.5" style={{ color: "#8b9a9f" }}>
+          <div className="starbot-wrap font-mono text-[10px] mt-0.5" style={{ color: "#5f6e74" }}>
             {t.due && <span style={{ color: !done && t.due < todayISO() ? TIDE : undefined }}>due {t.due}</span>}
             {t.due && t.source ? " · " : ""}
             {t.source && (t.sourceLink
@@ -210,7 +210,7 @@ export default function TaskBoard() {
           </div>
         )}
       </div>
-      <button onClick={() => delTodo(t)} className="p-1 hover-reveal rounded hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Delete"><Trash2 size={12} /></button>
+      <button onClick={() => delTodo(t)} className="p-2 hover-reveal rounded hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Delete"><Trash2 size={12} /></button>
     </li>
   );
 
@@ -220,14 +220,14 @@ export default function TaskBoard() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div>
           <div className="text-lg font-bold" style={{ fontFamily: "Georgia, serif" }}>{dateLabel}</div>
-          <div className="flex gap-4 mt-1 text-[12.5px]" style={{ color: "#6b7a80" }}>
+          <div className="flex gap-4 mt-1 text-[12.5px]" style={{ color: "#55646a" }}>
             <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: MEET }} /><b style={{ color: INK }}>{todays.length}</b> meeting{todays.length === 1 ? "" : "s"}</span>
             <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: SEA }} /><b style={{ color: INK }}>{replies.length}</b> repl{replies.length === 1 ? "y" : "ies"}</span>
             <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: PERSON }} /><b style={{ color: INK }}>{followups.length}</b> follow-up{followups.length === 1 ? "" : "s"}</span>
           </div>
         </div>
         <div className="flex items-center gap-2.5">
-          {synced && <span className="text-[12px]" style={{ color: "#8b9a9f" }}>Updated {clockTime(synced)}</span>}
+          {synced && <span className="text-[12px]" style={{ color: "#5f6e74" }}>Updated {clockTime(synced)}</span>}
           <button onClick={load} disabled={busy} className="inline-flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium disabled:opacity-60" style={{ background: "white", color: INK, border: "1px solid " + BORDER }}>
             <RotateCcw size={15} className={busy ? "animate-spin" : ""} /> Refresh
           </button>
@@ -242,13 +242,13 @@ export default function TaskBoard() {
           <div className="flex items-center gap-2 mb-1">
             <Calendar size={15} style={{ color: MEET }} />
             <span className="font-mono text-xs uppercase tracking-widest font-bold" style={{ color: MEET }}>Today's meetings</span>
-            <span className="ml-auto text-[11px]" style={{ color: "#8b9a9f" }}>from your calendar</span>
+            <span className="ml-auto text-[11px]" style={{ color: "#5f6e74" }}>from your calendar</span>
           </div>
-          {upcoming.length === 0 && earlier.length === 0 && <div className="text-sm py-2" style={{ color: "#8b9a9f" }}>Nothing on the calendar today.</div>}
+          {upcoming.length === 0 && earlier.length === 0 && <div className="text-sm py-2" style={{ color: "#5f6e74" }}>Nothing on the calendar today.</div>}
           {upcoming.map((m) => <MeetingRow key={m.id} m={m} />)}
           {earlier.length > 0 && (
             <div className="mt-1">
-              <button onClick={() => setShowEarlier((v) => !v)} className="inline-flex items-center gap-1 text-[12px] font-medium py-1" style={{ color: "#8b9a9f" }}>
+              <button onClick={() => setShowEarlier((v) => !v)} className="inline-flex items-center gap-1 text-[12px] font-medium py-1" style={{ color: "#5f6e74" }}>
                 <ChevronDown size={13} className={"transition-transform " + (showEarlier ? "" : "-rotate-90")} /> Earlier today ({earlier.length})
               </button>
               {showEarlier && earlier.map((m) => <MeetingRow key={m.id} m={m} dim />)}
@@ -262,8 +262,8 @@ export default function TaskBoard() {
               {showLater && (
                 <ul className="mt-1 space-y-1">
                   {later.map((m) => (
-                    <li key={m.id} className="text-[13px] flex gap-2" style={{ color: "#4a5a60" }}>
-                      <span className="font-mono text-[11px] shrink-0 w-24" style={{ color: "#8b9a9f" }}>{wkday(m.start)} {meetTime(m)}</span>
+                    <li key={m.id} className="text-[13px] flex gap-2" style={{ color: "#343e41" }}>
+                      <span className="font-mono text-[11px] shrink-0 w-24" style={{ color: "#5f6e74" }}>{wkday(m.start)} {meetTime(m)}</span>
                       <span className="truncate">{m.subject || "(no title)"}</span>
                     </li>
                   ))}
@@ -278,14 +278,14 @@ export default function TaskBoard() {
           <div className="flex items-center gap-2 mb-1">
             <Mail size={15} style={{ color: SEA }} />
             <span className="font-mono text-xs uppercase tracking-widest font-bold" style={{ color: SEA }}>Replies needed</span>
-            <span className="ml-auto text-[11px]" style={{ color: "#8b9a9f" }}>emails you flagged in Outlook</span>
+            <span className="ml-auto text-[11px]" style={{ color: "#5f6e74" }}>emails you flagged in Outlook</span>
           </div>
-          {replies.length === 0 && <div className="text-sm py-2" style={{ color: "#8b9a9f" }}>No flagged emails. Flag one in Outlook and it shows up here.</div>}
+          {replies.length === 0 && <div className="text-sm py-2" style={{ color: "#5f6e74" }}>No flagged emails. Flag one in Outlook and it shows up here.</div>}
           {replies.map((r) => (
             <div key={r.id} className="flex items-start gap-3 py-2.5" style={{ borderTop: "1px solid #f0ece5" }}>
               <div className="min-w-0 flex-1">
                 <div className="text-[14px] font-medium break-words">{r.subject || "(no subject)"}</div>
-                <div className="flex items-center gap-2 flex-wrap mt-0.5 text-[12px]" style={{ color: "#8b9a9f" }}>
+                <div className="flex items-center gap-2 flex-wrap mt-0.5 text-[12px]" style={{ color: "#5f6e74" }}>
                   <span>{fromName(r.from)}</span>
                   {r.received && <span>· flagged, rec'd {shortDate(r.received)}</span>}
                 </div>
@@ -296,7 +296,7 @@ export default function TaskBoard() {
                     <ExternalLink size={12} /> Open in Outlook
                   </a>
                 )}
-                <button onClick={() => dismiss(r.id)} title="Dismiss (remove from this list)" className="p-1.5 rounded hover:bg-stone-100" style={{ color: "#b0b8ba" }}><X size={15} /></button>
+                <button onClick={() => dismiss(r.id)} title="Dismiss (remove from this list)" className="p-2.5 rounded hover:bg-stone-100" style={{ color: "#6f7d82" }}><X size={15} /></button>
               </div>
             </div>
           ))}
@@ -307,9 +307,9 @@ export default function TaskBoard() {
           <div className="flex items-center gap-2 mb-1">
             <Users size={15} style={{ color: PERSON }} />
             <span className="font-mono text-xs uppercase tracking-widest font-bold" style={{ color: PERSON }}>People to follow up</span>
-            <span className="ml-auto text-[11px]" style={{ color: "#8b9a9f" }}>next actions from your CRM</span>
+            <span className="ml-auto text-[11px]" style={{ color: "#5f6e74" }}>next actions from your CRM</span>
           </div>
-          {followups.length === 0 && <div className="text-sm py-2" style={{ color: "#8b9a9f" }}>No open follow-ups. Set a "next action" on a contact and it lands here.</div>}
+          {followups.length === 0 && <div className="text-sm py-2" style={{ color: "#5f6e74" }}>No open follow-ups. Set a "next action" on a contact and it lands here.</div>}
           {followups.map((f) => {
             const d = dueMeta(f.nextDue);
             const c = catOf(f.category);
@@ -322,8 +322,8 @@ export default function TaskBoard() {
                   <div className="text-[14px]">{f.nextAction}</div>
                   <div className="flex items-center gap-2 flex-wrap mt-0.5">
                     <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: MIST, color: c.color }}>{f.name}</span>
-                    {f.company && <span className="text-[12px]" style={{ color: "#8b9a9f" }}>{f.company}</span>}
-                    {d.label && <span className="text-[11.5px] font-semibold" style={{ color: d.cls === "over" ? TIDE : d.cls === "today" ? SEA : "#8b9a9f" }}>{d.label}</span>}
+                    {f.company && <span className="text-[12px]" style={{ color: "#5f6e74" }}>{f.company}</span>}
+                    {d.label && <span className="text-[11.5px] font-semibold" style={{ color: d.cls === "over" ? TIDE : d.cls === "today" ? SEA : "#5f6e74" }}>{d.label}</span>}
                   </div>
                 </div>
               </div>
@@ -336,8 +336,8 @@ export default function TaskBoard() {
           <div className="flex items-center gap-2 mb-3">
             <ListTodo size={16} style={{ color: SEA }} />
             <span className="font-mono text-xs uppercase tracking-widest" style={{ color: SEA }}>Your tasks</span>
-            <span className="text-[11px]" style={{ color: "#8b9a9f" }}>{openTodos.length} open</span>
-            <span className="ml-auto text-[11px]" style={{ color: "#8b9a9f" }}>personal + starbot to-dos</span>
+            <span className="text-[11px]" style={{ color: "#5f6e74" }}>{openTodos.length} open</span>
+            <span className="ml-auto text-[11px]" style={{ color: "#5f6e74" }}>personal + starbot to-dos</span>
           </div>
           <div className="flex gap-2 mb-3 max-w-2xl">
             <input value={todoText} onChange={(e) => setTodoText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTodo()} placeholder="Add a task…" className="flex-1 border rounded px-3 py-2 text-sm bg-white min-w-0" style={{ borderColor: BORDER }} />
@@ -345,7 +345,7 @@ export default function TaskBoard() {
           </div>
 
           {openTodos.length === 0 && (
-            <div className="text-sm py-3" style={{ color: "#8b9a9f" }}>Nothing open. Add one, or ask starbot to build a list from your email.</div>
+            <div className="text-sm py-3" style={{ color: "#5f6e74" }}>Nothing open. Add one, or ask starbot to build a list from your email.</div>
           )}
           <ul className="grid gap-x-8 gap-y-1 md:grid-cols-2">
             {openTodos.map((t) => <TodoRow key={t.id} t={t} done={false} />)}
@@ -354,7 +354,7 @@ export default function TaskBoard() {
           {doneTodos.length > 0 && (
             <div className="mt-4 pt-3" style={{ borderTop: "1px solid #f0ece5" }}>
               <div className="flex items-center gap-2">
-                <button onClick={() => setShowDone((v) => !v)} className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-widest font-bold" style={{ color: "#8b9a9f" }}>
+                <button onClick={() => setShowDone((v) => !v)} className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-widest font-bold" style={{ color: "#5f6e74" }}>
                   <ChevronDown size={13} className={"transition-transform " + (showDone ? "" : "-rotate-90")} /> Completed ({doneTodos.length})
                 </button>
                 {showDone && (
@@ -366,7 +366,7 @@ export default function TaskBoard() {
                   {doneTodos.map((t) => <TodoRow key={t.id} t={t} done />)}
                 </ul>
               )}
-              {!showDone && <div className="text-[11px] mt-1" style={{ color: "#b0b8ba" }}>Checked something off by accident? Expand to reopen it.</div>}
+              {!showDone && <div className="text-[11px] mt-1" style={{ color: "#6f7d82" }}>Checked something off by accident? Expand to reopen it.</div>}
             </div>
           )}
         </section>

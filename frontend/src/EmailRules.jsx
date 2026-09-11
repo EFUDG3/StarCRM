@@ -100,7 +100,7 @@ export default function EmailRules({ onChanged }) {
     <div className="space-y-3">
       {/* Header line: what the loop has learned so far, as a number. */}
       <div className="bg-white rounded-lg border px-3 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs"
-        style={{ borderColor: BORDER, color: "#8b9a9f" }}>
+        style={{ borderColor: BORDER, color: "#5f6e74" }}>
         <span><strong style={{ color: INK }}>{rules.length}</strong> of your rules</span>
         <span><strong style={{ color: INK }}>{activeCompany}</strong> built-in rules on</span>
         <span><strong style={{ color: INK }}>{correctionCount}</strong> correction{correctionCount === 1 ? "" : "s"} recorded</span>
@@ -115,10 +115,10 @@ export default function EmailRules({ onChanged }) {
           <span className="font-mono text-[10px] font-bold uppercase tracking-widest" style={{ color: SEA }}>
             Suggested rules
           </span>
-          <span className="font-mono text-xs tabular-nums" style={{ color: "#8b9a9f" }}>{suggestions.length}</span>
+          <span className="font-mono text-xs tabular-nums" style={{ color: "#5f6e74" }}>{suggestions.length}</span>
         </div>
         {suggestions.length === 0 ? (
-          <div className="px-3 py-6 text-sm text-center" style={{ color: "#b0b8ba" }}>
+          <div className="px-3 py-6 text-sm text-center" style={{ color: "#6f7d82" }}>
             Nothing to suggest yet. Move {suggestThreshold} or more similar threads to the
             lane they belong in and a rule shows up here for you to approve.
           </div>
@@ -127,7 +127,7 @@ export default function EmailRules({ onChanged }) {
             {suggestions.map((s) => (
               <li key={s.id} className="px-3 py-3" style={{ borderBottom: "1px solid " + ROW_LINE }}>
                 <div className="text-sm font-medium mb-0.5" style={{ color: INK }}>{s.describe}</div>
-                <div className="text-xs mb-2" style={{ color: "#8b9a9f" }}>{s.rationale}</div>
+                <div className="text-xs mb-2" style={{ color: "#5f6e74" }}>{s.rationale}</div>
                 <div className="flex items-center gap-2">
                   <button disabled={busy}
                     onClick={() => guard(async () => afterWrite(await api.acceptTriageSuggestion(s.id)))}
@@ -138,10 +138,10 @@ export default function EmailRules({ onChanged }) {
                   <button disabled={busy}
                     onClick={() => guard(async () => { await api.rejectTriageSuggestion(s.id); await load(); })}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border disabled:opacity-60"
-                    style={{ borderColor: BORDER, color: "#4a5a60" }}>
+                    style={{ borderColor: BORDER, color: "#343e41" }}>
                     <X size={12} /> Not quite
                   </button>
-                  <span className="font-mono text-[10px] ml-auto" style={{ color: "#b0b8ba" }}>
+                  <span className="font-mono text-[10px] ml-auto" style={{ color: "#6f7d82" }}>
                     {s.evidenceCount} correction{s.evidenceCount === 1 ? "" : "s"}
                   </span>
                 </div>
@@ -157,7 +157,7 @@ export default function EmailRules({ onChanged }) {
           <span className="font-mono text-[10px] font-bold uppercase tracking-widest" style={{ color: INK }}>
             Your rules
           </span>
-          <span className="font-mono text-xs tabular-nums" style={{ color: "#8b9a9f" }}>{rules.length}</span>
+          <span className="font-mono text-xs tabular-nums" style={{ color: "#5f6e74" }}>{rules.length}</span>
           <button onClick={() => setShowAdd((v) => !v)}
             className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium"
             style={{ background: showAdd ? MIST : INK, color: showAdd ? INK : "white" }}>
@@ -175,7 +175,7 @@ export default function EmailRules({ onChanged }) {
         )}
 
         {rules.length === 0 ? (
-          <div className="px-3 py-6 text-sm text-center" style={{ color: "#b0b8ba" }}>
+          <div className="px-3 py-6 text-sm text-center" style={{ color: "#6f7d82" }}>
             No rules of your own yet. Add one above, or let the bot suggest them from
             how you sort your mail.
           </div>
@@ -184,10 +184,10 @@ export default function EmailRules({ onChanged }) {
             {rules.map((r) => (
               <li key={r.id} className="px-3 py-2.5 flex items-start gap-3" style={{ borderBottom: "1px solid " + ROW_LINE }}>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm break-words" style={{ color: r.active ? INK : "#b0b8ba" }}>
+                  <div className="text-sm break-words" style={{ color: r.active ? INK : "#6f7d82" }}>
                     {r.describe}
                   </div>
-                  <div className="flex items-center gap-2 mt-0.5 font-mono text-[10px]" style={{ color: "#b0b8ba" }}>
+                  <div className="flex items-center gap-2 mt-0.5 font-mono text-[10px]" style={{ color: "#6f7d82" }}>
                     {r.kind === "soft" && (
                       <span className="inline-flex items-center gap-1" style={{ color: SEA }}>
                         <Sparkles size={9} /> judgment
@@ -211,8 +211,8 @@ export default function EmailRules({ onChanged }) {
                 </button>
                 <button disabled={busy}
                   onClick={() => guard(async () => afterWrite(await api.deleteTriageRule(r.id)))}
-                  className="shrink-0 p-1 rounded hover:bg-stone-200 disabled:opacity-60"
-                  title="Delete this rule" style={{ color: "#8b9a9f" }}>
+                  className="shrink-0 p-2 rounded hover:bg-stone-200 disabled:opacity-60"
+                  title="Delete this rule" style={{ color: "#5f6e74" }}>
                   <Trash2 size={13} />
                 </button>
               </li>
@@ -299,7 +299,7 @@ function AddRuleForm({ signals, busy, onCancel, onSubmit }) {
               className="bg-white border rounded px-2 py-1.5 text-sm flex-1 min-w-48" style={{ borderColor: BORDER }} />
           )}
 
-          <span className="text-sm" style={{ color: "#8b9a9f" }}>goes to</span>
+          <span className="text-sm" style={{ color: "#5f6e74" }}>goes to</span>
           <select value={target} onChange={(e) => setTarget(e.target.value)}
             className="bg-white border rounded px-2 py-1.5 text-sm" style={{ borderColor: BORDER }}>
             {Object.entries(LANE_LABEL).map(([k, label]) => (
@@ -312,7 +312,7 @@ function AddRuleForm({ signals, busy, onCancel, onSubmit }) {
           <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} maxLength={500}
             placeholder="e.g. I don't need to reply to LeighAnn unless she asks me something directly."
             className="w-full bg-white border rounded px-2 py-1.5 text-sm" style={{ borderColor: BORDER }} />
-          <div className="text-[11px] mt-1" style={{ color: "#8b9a9f" }}>
+          <div className="text-[11px] mt-1" style={{ color: "#5f6e74" }}>
             Written in plain language and handed to the triage model. Applies to threads
             the exact-match rules can't settle on their own.
           </div>
@@ -325,7 +325,7 @@ function AddRuleForm({ signals, busy, onCancel, onSubmit }) {
           style={{ background: INK }}>Save rule</button>
         <button type="button" onClick={onCancel}
           className="px-3 py-1.5 rounded text-xs font-medium border"
-          style={{ borderColor: BORDER, color: "#4a5a60" }}>Cancel</button>
+          style={{ borderColor: BORDER, color: "#343e41" }}>Cancel</button>
       </div>
     </form>
   );
@@ -345,7 +345,7 @@ function ProfileBox({ initial, busy, onSave }) {
         </span>
       </div>
       <div className="px-3 py-3">
-        <p className="text-xs mb-2" style={{ color: "#8b9a9f" }}>
+        <p className="text-xs mb-2" style={{ color: "#5f6e74" }}>
           A sentence or two about what you actually do. The triage reads this before it
           judges anything, and for most people it changes more verdicts than any single rule.
         </p>
@@ -359,7 +359,7 @@ function ProfileBox({ initial, busy, onSave }) {
           {dirty && (
             <button onClick={() => setText(initial)}
               className="flex items-center gap-1 px-2 py-1.5 rounded text-xs border"
-              style={{ borderColor: BORDER, color: "#4a5a60" }}>
+              style={{ borderColor: BORDER, color: "#343e41" }}>
               <RotateCcw size={11} /> Revert
             </button>
           )}
@@ -405,7 +405,7 @@ function Maintenance() {
       </div>
       <div className="px-3 py-3">
         <div className="text-sm font-medium" style={{ color: INK }}>Rebuild from Outlook</div>
-        <p className="text-xs mt-0.5 mb-2" style={{ color: "#8b9a9f" }}>
+        <p className="text-xs mt-0.5 mb-2" style={{ color: "#5f6e74" }}>
           Re-reads your last 30 days from scratch and re-sorts everything. Use this after an
           update changes how mail is read. Takes about a minute — a normal Refresh is much
           faster and is what you want day to day. Threads you moved by hand stay where you put them.
@@ -442,10 +442,10 @@ function CompanyRules({ rules, busy, onToggle }) {
         <span className="font-mono text-[10px] font-bold uppercase tracking-widest" style={{ color: INK }}>
           Built-in rules
         </span>
-        <span className="font-mono text-xs tabular-nums" style={{ color: "#8b9a9f" }}>
+        <span className="font-mono text-xs tabular-nums" style={{ color: "#5f6e74" }}>
           {rules.filter((r) => r.active).length}/{rules.length} on
         </span>
-        <span className="ml-auto font-mono text-[10px]" style={{ color: "#8b9a9f" }}>
+        <span className="ml-auto font-mono text-[10px]" style={{ color: "#5f6e74" }}>
           {open ? "Hide" : "Show"}
         </span>
       </button>
@@ -459,14 +459,14 @@ function CompanyRules({ rules, busy, onToggle }) {
               <div className="font-mono text-[10px] font-bold uppercase tracking-widest" style={{ color: SEA }}>
                 {g.label}
               </div>
-              <div className="text-[11px] mt-0.5" style={{ color: "#b0b8ba" }}>{g.note}</div>
+              <div className="text-[11px] mt-0.5" style={{ color: "#6f7d82" }}>{g.note}</div>
             </div>
             <ul>
               {rows.map((r) => (
                 <li key={r.id} className="px-3 py-2 flex items-start gap-3" style={{ borderTop: "1px solid " + ROW_LINE }}>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm break-words" style={{ color: r.active ? INK : "#b0b8ba" }}>{r.label}</div>
-                    <div className="text-[11px] mt-0.5" style={{ color: "#8b9a9f" }}>{r.why}</div>
+                    <div className="text-sm break-words" style={{ color: r.active ? INK : "#6f7d82" }}>{r.label}</div>
+                    <div className="text-[11px] mt-0.5" style={{ color: "#5f6e74" }}>{r.why}</div>
                   </div>
                   {r.editable ? (
                     <button disabled={busy} onClick={() => onToggle(r.id, !r.active)}
@@ -477,7 +477,7 @@ function CompanyRules({ rules, busy, onToggle }) {
                         style={{ left: r.active ? "18px" : "2px" }} />
                     </button>
                   ) : (
-                    <Lock size={13} className="shrink-0 mt-0.5" style={{ color: "#b0b8ba" }} title="Always on" />
+                    <Lock size={13} className="shrink-0 mt-0.5" style={{ color: "#6f7d82" }} title="Always on" />
                   )}
                 </li>
               ))}

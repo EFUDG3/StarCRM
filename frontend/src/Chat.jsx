@@ -230,7 +230,7 @@ export default function StarbotChat() {
       <Card>
         <Sparkles size={28} style={{ color: SEA }} className="mx-auto mb-3" />
         <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "Georgia, serif" }}>Starbot isn't configured yet</h2>
-        <p className="text-sm" style={{ color: "#4a5a60" }}>
+        <p className="text-sm" style={{ color: "#343e41" }}>
           Microsoft 365 sign-in needs ENTRA_TENANT_ID, ENTRA_CLIENT_ID, and
           ENTRA_CLIENT_SECRET set on the server. Ask IT (Ethan) to finish setup.
         </p>
@@ -245,7 +245,7 @@ export default function StarbotChat() {
         <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "Georgia, serif" }}>
           <span style={{ color: SEA }}>★</span> Meet starbot
         </h2>
-        <p className="text-sm mb-5 max-w-md mx-auto" style={{ color: "#4a5a60" }}>
+        <p className="text-sm mb-5 max-w-md mx-auto" style={{ color: "#343e41" }}>
           Your Star Flooring assistant. It reads <b>your</b> email, calendar, and
           SharePoint — only what you can already see — to answer questions, build
           to-do lists, triage your inbox, and draft replies.
@@ -278,10 +278,10 @@ export default function StarbotChat() {
             ★ Starbot · {me.name}
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={clearChat} title="New conversation" className="p-1.5 rounded hover:bg-stone-100" style={{ color: INK }}>
+            <button onClick={clearChat} title="New conversation" className="p-2.5 rounded hover:bg-stone-100" style={{ color: INK }}>
               <RotateCcw size={14} />
             </button>
-            <button onClick={signOut} title="Sign out of Microsoft" className="p-1.5 rounded hover:bg-stone-100" style={{ color: INK }}>
+            <button onClick={signOut} title="Sign out of Microsoft" className="p-2.5 rounded hover:bg-stone-100" style={{ color: INK }}>
               <LogOut size={14} />
             </button>
           </div>
@@ -290,7 +290,7 @@ export default function StarbotChat() {
         <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {chat.ui.length === 0 && (
             <div className="pt-8 text-center">
-              <div className="text-sm mb-4" style={{ color: "#8b9a9f" }}>
+              <div className="text-sm mb-4" style={{ color: "#5f6e74" }}>
                 Ask about your email, calendar, files, or contacts. A few ideas:
               </div>
               <div className="flex flex-wrap gap-2 justify-center max-w-md mx-auto">
@@ -421,10 +421,10 @@ export default function StarbotChat() {
                 {t.done && <Check size={11} color="white" />}
               </button>
               <div className="min-w-0 flex-1">
-                <div className="text-[15px] leading-snug" style={{ textDecoration: t.done ? "line-through" : "none", color: t.done ? "#8b9a9f" : INK }}>
+                <div className="text-[15px] leading-snug" style={{ textDecoration: t.done ? "line-through" : "none", color: t.done ? "#5f6e74" : INK }}>
                   {t.text}
                 </div>
-                <div className="starbot-wrap font-mono text-[10px] mt-0.5" style={{ color: "#8b9a9f" }}>
+                <div className="starbot-wrap font-mono text-[10px] mt-0.5" style={{ color: "#5f6e74" }}>
                   {t.priority && (
                     <span className="uppercase font-bold mr-1.5" style={{ color: t.priority === "high" ? TIDE : t.priority === "medium" ? "#B7791F" : "#4A5A6A" }}>
                       {t.priority}
@@ -438,13 +438,13 @@ export default function StarbotChat() {
                     : t.source)}
                 </div>
               </div>
-              <button onClick={() => removeTodo(t)} className="p-1 hover-reveal rounded hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Delete">
+              <button onClick={() => removeTodo(t)} className="p-2 hover-reveal rounded hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Delete">
                 <Trash2 size={12} />
               </button>
             </li>
           ))}
           {todos.length === 0 && (
-            <li className="text-sm py-3 text-center" style={{ color: "#8b9a9f" }}>
+            <li className="text-sm py-3 text-center" style={{ color: "#5f6e74" }}>
               Nothing yet. Try "Make a to-do list from my recent emails".
             </li>
           )}

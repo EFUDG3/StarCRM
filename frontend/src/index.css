@@ -9,6 +9,30 @@ html {
   overflow-y: scroll;
 }
 
+/* --- Accessibility pass (2026-09-11, local-only, Ethan) ---
+   Bumping the root font-size scales every Tailwind rem-based text/spacing
+   utility app-wide (text-sm, p-2, gap-3, etc. are all defined in rem), so
+   this one line makes text AND touch targets larger together instead of
+   requiring an edit per component. Revert by deleting this rule. */
+html {
+  font-size: 106.25%; /* 16px -> 17px */
+}
+
+/* Buttons carry their color via inline `style={{ background: INK }}` etc.
+   rather than Tailwind classes, so a color-name-specific :hover rule can't
+   reach them. `filter: brightness()` darkens whatever background a button
+   already has, which makes this one rule work for every button in the app
+   regardless of its color. Revert by deleting this block. */
+button:not(:disabled) {
+  transition: filter 0.12s ease;
+}
+button:not(:disabled):hover {
+  filter: brightness(0.92);
+}
+button:not(:disabled):active {
+  filter: brightness(0.85);
+}
+
 /* Starbot chat: readable markdown inside assistant bubbles (Tailwind preflight
    strips list/paragraph styling, so restore just what chat answers need). */
 .starbot-md > *:first-child { margin-top: 0; }

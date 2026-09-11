@@ -131,6 +131,63 @@ This file is the single source of truth for picking the project back up. Read it
 > - **Deferred until:** phase-2 digest is live (target 2026-08-25 today). Then meetings is
 >   next in line.
 
+> **UI ACCESSIBILITY PASS (2026-09-11) - larger text/touch-targets, darker muted grays, wider
+> content area, button hover feedback, looser line-height. Frontend-only, no backend/schema
+> changes. Built + visually reviewed by Ethan in local dev across this session; committing now,
+> deploy to follow (Ethan runs push + `az acr build`/`containerapp update` himself, per usual).**
+> - **Why:** make StarCRM easier to use for older/less-technical staff. Specific complaints came
+>   from Ethan looking at real screenshots mid-session, not guessed at up front (e.g. the
+>   Mileage "Pull from my calendar" label called out twice before it actually read as dark enough).
+> - **Root font-size bumped 16px->17px** (`index.css`, `html { font-size: 106.25% }`) - scales
+>   every rem-based Tailwind text/spacing utility app-wide in one line rather than touching each
+>   component. Does NOT reach hardcoded `text-[Npx]` classes (see column headers below) since
+>   those are literal pixels, not rem.
+> - **Global button hover/press feedback** (`index.css`): buttons carry color via inline
+>   `style={{ background: INK }}` etc. rather than Tailwind classes, so a `filter: brightness()`
+>   rule on `button:hover`/`:active` was the one approach that reaches every button regardless of
+>   its specific color.
+> - **Page canvas darkened** (`App.jsx`): new `PAGE_BG = "#EBE6E0"`, ~4pt darker than the existing
+>   `MIST` (`#F3F0EC`). Applied ONLY to the four outer page wrappers (loading/sign-in/board-empty/
+>   main shell) - `MIST` itself is untouched because it's reused everywhere as a chip/panel
+>   background *inside* white cards, and darkening it too would have killed the contrast it was
+>   meant to create.
+> - **Muted-gray text ladder darkened across every tab** (~195 occurrences across Accounts/App/
+>   Chat/Email/EmailRules/Mileage/Projects/Tasks): `#8b9a9f` (~2.9:1 contrast, the most common
+>   offender) -> `#5f6e74` (~5.3:1); `#b0b8ba` (~1.9:1) -> `#6f7d82` (~4.3:1); `#6b7a80` (~4.5:1,
+>   borderline) -> `#55646a` (~6.1:1); `#4a5a60` -> `#343e41` (measured ~7-11:1 but still looked
+>   pale in practice on small-caps/tracking-widest labels - contrast-ratio math undersells how
+>   much anti-aliasing thins small tracked-out type). The Mileage "Pull from my calendar" label
+>   specifically now uses `INK` directly rather than the shared tier, since even the darkened tier
+>   read as too light there.
+> - **Column headers bumped `text-[10px]` -> `text-[11px]`** in the CRM contact table (`App.jsx`)
+>   and account table (`Accounts.jsx`) - these use hardcoded pixel sizes, so they were the one
+>   spot the root font-size bump didn't reach.
+> - **Icon-only action buttons (edit/delete/dismiss/move) got +4px padding on each side** app-wide
+>   (`p-1`->`p-2`, `p-1.5`->`p-2.5`, `p-2`->`p-3`), including Email's "Move"/"Restore" chips
+>   (`px-1.5 py-0.5`->`px-2.5 py-1.5`) - bigger touch targets without changing icon size.
+> - **Line-height loosened via `tailwind.config.js` theme override**, not a generic CSS rule -
+>   Tailwind's `text-xs`/`text-sm`/`text-base` utilities set line-height directly on the element
+>   (used almost everywhere in this codebase), which would silently override a `body { line-height
+>   }` rule. New pairs: xs 1rem->1.125rem, sm 1.25rem->1.375rem, base 1.5rem->1.625rem. Elements
+>   with an explicit `leading-*` class are unaffected (more specific).
+> - **Main content container widened then re-narrowed to taste**: `max-w-5xl` (64rem) ->
+>   `max-w-6xl` (72rem) -> settled at `max-w-[70.25rem]` (1124px) after two rounds of "shave a few
+>   px" feedback, keeping the existing `lg:` calc-split-the-difference formula proportional to the
+>   new base.
+> - **Verified, not assumed: real hyperlinks (`<a>` tags) already use `underline` app-wide.**
+>   Checked every `<a>` in the codebase before claiming a gap. Only exception is the 6 "Sign in
+>   with Microsoft" links, correctly unstyled since they're solid CTA buttons, not text links.
+> - **Process note:** an early pass used `sed` to bulk-replace hex colors and silently stripped
+>   this repo's CRLF line endings on 8 files, turning a dozen real edits into a 1000+-line-diff per
+>   file. Caught via `git diff --stat` before anything was committed; restored CRLF and re-verified
+>   diffs were proportional to the actual changes. Worth remembering: `sed -i` on this Windows repo
+>   needs a manual CRLF restore pass (`sed -i 's/\r$//; s/$/\r/'`) or should be avoided in favor of
+>   the Edit tool, which preserves line endings natively.
+> - **Also swept up in this commit: a stale doc gap below.** The 2026-09-02 `50c721d` triage-engine
+>   commit was never actually pushed to GitHub despite this file previously saying "Ethan pushed it
+>   himself, per usual" - confirmed with a fresh `git fetch` before touching anything. Going out
+>   together with today's UI commit.
+
 > **DEPLOYED 2026-09-10 (rev `starbot--triagerules`) - the triage engine split, per-user rules and
 > correction feedback loop are LIVE. NOT COMMITTED TO GIT - see the warning below.**
 > - **Build:** `az acr build --registry cadd18599bd0acr --image starbot:triage-rules .` -> Run ID
@@ -171,12 +228,13 @@ This file is the single source of truth for picking the project back up. Read it
 >     "Built-in rules", "Where does this belong", "Something in the wrong lane", "more below the
 >     top", "Not my area", "you moved this here", "Handled" - and does NOT contain "starbotMail",
 >     confirming the named-tab revert shipped (rows open a new tab each, as Ethan wants).
-> - **!! PROD IS RUNNING UNCOMMITTED CODE !!** The working tree holds all of it - `triage_engine.py`,
->   `triage_feedback.py`, `backend/tests/`, `EmailRules.jsx` are still UNTRACKED, and
->   email_triage/main/models/schemas/database/Email.jsx/api.js are modified. `acr build` packs the
->   working directory, not a git ref, so the deploy did not need a commit - but this is the exact
->   situation that bit revs 41-42 in August. **Ethan should commit + push** (he does his own git):
->   `git add -A; git commit -m "email: triage engine split (signals + decide), per-user rules, correction feedback loop"`
+> - **COMMITTED: `50c721d`** "email: triage engine split (signals + decide), per-user rules,
+>   correction feedback loop" (Ethan pushed it himself, per usual; no Co-Authored-By trailer).
+>   Working tree clean. **So `starbot--triagerules` == commit `50c721d`** - prod is traceable to
+>   a known ref, which is what revs 41-42 lacked in August. Note the deploy happened BEFORE the
+>   commit (`acr build` packs the working directory, not a git ref), so the image and the commit
+>   match only because nothing changed in between - verify with `git status` before trusting the
+>   equivalence on any future deploy.
 > - **REMAINING MANUAL STEP, once per pilot mailbox:** Email tab -> **Triage rules** -> Maintenance ->
 >   **Rebuild from Outlook**. Rebuilds snippets with the signature fix, re-triages with the model
 >   pass (recovering whatever the old ack regex swallowed), preserves hand-moved threads. ~80s and

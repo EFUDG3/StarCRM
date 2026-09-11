@@ -32,7 +32,7 @@ const STAGES = [
   { key: "in_progress", label: "In progress", bg: "rgba(47,93,80,.16)",   fg: "#2b6a58", open: true, main: true },
   { key: "punch_list",  label: "Punch list",  bg: "rgba(140,109,70,.16)", fg: "#8C6D46", open: true },
   { key: "awarded",     label: "Awarded",     bg: "rgba(62,76,89,.14)",   fg: "#3E4C59", open: true },
-  { key: "bidding",     label: "Bidding",     bg: "#ece7df",              fg: "#6b7a80", open: false },
+  { key: "bidding",     label: "Bidding",     bg: "#ece7df",              fg: "#55646a", open: false },
   { key: "complete",    label: "Complete",    bg: "#2F5D50",              fg: "#ffffff", open: false },
   { key: "lost",        label: "Lost",        bg: "#e7e2da",              fg: "#9aa4a8", open: false },
 ];
@@ -258,7 +258,7 @@ export default function Projects() {
       <section className="bg-white rounded-lg p-8 text-center border-l-4 max-w-lg mx-auto mt-8" style={{ borderColor: SEA }}>
         <HardHat size={28} style={{ color: SEA }} className="mx-auto mb-3" />
         <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "Georgia, serif" }}>Star Projects</h2>
-        <p className="text-[15px] mb-5" style={{ color: "#4a5a60" }}>The commercial job board. Sign in with your Star account to view and edit.</p>
+        <p className="text-[15px] mb-5" style={{ color: "#343e41" }}>The commercial job board. Sign in with your Star account to view and edit.</p>
         <a href={api.authLoginUrl()} className="inline-flex items-center gap-2 px-5 py-2.5 rounded text-white text-sm font-medium" style={{ background: INK }}>Sign in with Microsoft</a>
       </section>
     );
@@ -297,7 +297,7 @@ export default function Projects() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="relative flex-1 min-w-56">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#8b9a9f" }} />
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#5f6e74" }} />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search job, client, PM, address, material"
             className="w-full bg-white border rounded pl-9 pr-3 py-2 text-sm" style={{ borderColor: BORDER }} />
         </div>
@@ -315,7 +315,7 @@ export default function Projects() {
         </button>
       </div>
 
-      <div className="text-xs mb-3 flex items-center gap-2 flex-wrap" style={{ color: "#8b9a9f" }}>
+      <div className="text-xs mb-3 flex items-center gap-2 flex-wrap" style={{ color: "#5f6e74" }}>
         <span>
           {liveCount} active job{liveCount === 1 ? "" : "s"}
           {view === "mine" ? " assigned to you" : view === "unassigned" ? " with no PM" : ""}
@@ -338,17 +338,17 @@ export default function Projects() {
             <section key={st.key} className="bg-white rounded-lg border overflow-hidden" style={{ borderColor: BORDER }}>
               <button onClick={() => toggleStage(st.key)} className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-stone-50"
                 style={{ borderBottom: isCollapsed ? "none" : "1px solid " + ROW_LINE }}>
-                {isCollapsed ? <ChevronRight size={15} style={{ color: "#8b9a9f" }} /> : <ChevronDown size={15} style={{ color: "#8b9a9f" }} />}
+                {isCollapsed ? <ChevronRight size={15} style={{ color: "#5f6e74" }} /> : <ChevronDown size={15} style={{ color: "#5f6e74" }} />}
                 <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: st.bg, color: st.fg }}>
                   {st.label}
                 </span>
-                <span className="font-mono text-xs tabular-nums" style={{ color: "#8b9a9f" }}>{rows.length}</span>
-                {st.main && <span className="text-[10px] font-mono uppercase tracking-widest ml-auto" style={{ color: "#b0b8ba" }}>main</span>}
+                <span className="font-mono text-xs tabular-nums" style={{ color: "#5f6e74" }}>{rows.length}</span>
+                {st.main && <span className="text-[10px] font-mono uppercase tracking-widest ml-auto" style={{ color: "#6f7d82" }}>main</span>}
               </button>
 
               {!isCollapsed && (
                 rows.length === 0 ? (
-                  <div className="px-3 py-6 text-sm text-center" style={{ color: "#b0b8ba" }}>
+                  <div className="px-3 py-6 text-sm text-center" style={{ color: "#6f7d82" }}>
                     Nothing in this stage{query.trim() || view !== "all" ? " matches" : ""} yet.
                   </div>
                 ) : (
@@ -362,16 +362,16 @@ export default function Projects() {
                             <div className="flex-1 min-w-52">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-semibold break-words" style={{ color: INK }}>{p.name}</span>
-                                <span className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: MIST, color: "#6b7a80" }}>
+                                <span className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: MIST, color: "#55646a" }}>
                                   {TYPES[p.projectType] || "Other"}
                                 </span>
                               </div>
-                              <div className="text-xs mt-0.5 flex items-center gap-2 flex-wrap" style={{ color: "#8b9a9f" }}>
+                              <div className="text-xs mt-0.5 flex items-center gap-2 flex-wrap" style={{ color: "#5f6e74" }}>
                                 {p.client && <span>{p.client}</span>}
                                 {p.siteAddress && <span className="inline-flex items-center gap-1"><MapPin size={11} />{p.siteAddress}</span>}
                               </div>
                               {p.log?.[0] && (
-                                <div className="text-xs mt-1 truncate" style={{ color: "#6b7a80", maxWidth: "38rem" }}>
+                                <div className="text-xs mt-1 truncate" style={{ color: "#55646a", maxWidth: "38rem" }}>
                                   <span className="font-mono" style={{ color: SEA }}>{p.log[0].date}</span>{" "}{p.log[0].note}
                                 </div>
                               )}
@@ -379,7 +379,7 @@ export default function Projects() {
 
                             <div className="flex items-center gap-3 shrink-0 ml-auto">
                               {p.sqFt != null && (
-                                <span className="font-mono text-[11px] tabular-nums hidden sm:inline" style={{ color: "#8b9a9f" }}>
+                                <span className="font-mono text-[11px] tabular-nums hidden sm:inline" style={{ color: "#5f6e74" }}>
                                   {p.sqFt.toLocaleString()} sf
                                 </span>
                               )}
@@ -391,7 +391,7 @@ export default function Projects() {
                               <span className="text-right min-w-20">
                                 {p.targetDate ? (
                                   <>
-                                    <span className="font-mono text-[12px] tabular-nums block" style={{ color: urg ? urg.color : "#6b7a80" }}>
+                                    <span className="font-mono text-[12px] tabular-nums block" style={{ color: urg ? urg.color : "#55646a" }}>
                                       {fmtDate(p.targetDate)}
                                     </span>
                                     {urg && <span className="text-[10px] font-medium block" style={{ color: urg.color }}>{urg.label}</span>}
@@ -403,7 +403,7 @@ export default function Projects() {
                                   style={{ background: pmColor(p.pm) }} title={p.pm}>{pmInitials(p.pm)}</span>
                               ) : (
                                 <span className="w-6 h-6 rounded-full text-[9px] font-bold flex items-center justify-center shrink-0"
-                                  style={{ background: MIST, color: "#b0b8ba" }} title="Unassigned">—</span>
+                                  style={{ background: MIST, color: "#6f7d82" }} title="Unassigned">—</span>
                               )}
                             </div>
                           </button>
@@ -419,7 +419,7 @@ export default function Projects() {
       </div>
 
       {filtered.length === 0 && (
-        <div className="text-sm text-center py-10" style={{ color: "#8b9a9f" }}>
+        <div className="text-sm text-center py-10" style={{ color: "#5f6e74" }}>
           {projects.length === 0
             ? "No projects yet. Add the first job with “New project”."
             : "No projects match. Clear the search or switch views."}
@@ -495,7 +495,7 @@ function ProjectForm({ initial, users, onCancel, onSave, onDelete, saveState }) 
           <ChevronLeft size={14} /> Back
         </button>
         {f.id && (
-          <button onClick={() => onDelete(f.id)} className="p-2 rounded hover:bg-stone-100" style={{ color: TIDE }} title="Delete project">
+          <button onClick={() => onDelete(f.id)} className="p-3 rounded hover:bg-stone-100" style={{ color: TIDE }} title="Delete project">
             <Trash2 size={16} />
           </button>
         )}
@@ -626,7 +626,7 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onChanged }) {
   const Meta = ({ icon, label, value }) => (
     <div>
       <div className={cap} style={{ color: SEA }}>{label}</div>
-      <div className="text-sm flex items-center gap-1.5" style={{ color: value ? INK : "#b0b8ba" }}>
+      <div className="text-sm flex items-center gap-1.5" style={{ color: value ? INK : "#6f7d82" }}>
         {value ? icon : null}{value || "—"}
       </div>
     </div>
@@ -643,7 +643,7 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onChanged }) {
             style={{ background: "white", color: INK, border: "1px solid " + BORDER }}>
             <Pencil size={14} /> Edit
           </button>
-          <button onClick={() => onDelete(proj.id)} className="p-2 rounded hover:bg-stone-100" style={{ color: TIDE }} title="Delete project">
+          <button onClick={() => onDelete(proj.id)} className="p-3 rounded hover:bg-stone-100" style={{ color: TIDE }} title="Delete project">
             <Trash2 size={16} />
           </button>
         </div>
@@ -654,8 +654,8 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onChanged }) {
         <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: st.bg, color: st.fg }}>{st.label}</span>
       </div>
 
-      <div className="flex items-center gap-3 flex-wrap text-sm mb-2" style={{ color: "#4a5a60" }}>
-        <span className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: MIST, color: "#6b7a80" }}>
+      <div className="flex items-center gap-3 flex-wrap text-sm mb-2" style={{ color: "#343e41" }}>
+        <span className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: MIST, color: "#55646a" }}>
           {TYPES[proj.projectType] || "Other"}
         </span>
         {proj.client && <span>{proj.client}</span>}
@@ -664,7 +664,7 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onChanged }) {
               <span className="w-5 h-5 rounded-full text-white text-[9px] font-bold flex items-center justify-center" style={{ background: pmColor(proj.pm) }}>{pmInitials(proj.pm)}</span>
               {proj.pm}
             </span>
-          : <span style={{ color: "#b0b8ba" }}>No PM assigned</span>}
+          : <span style={{ color: "#6f7d82" }}>No PM assigned</span>}
       </div>
 
       {urg && (
@@ -684,7 +684,7 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onChanged }) {
               className="font-mono text-[10px] font-bold px-2 py-1 rounded-full disabled:cursor-default"
               style={s.key === proj.stage
                 ? { background: s.bg, color: s.fg, outline: "2px solid " + INK, outlineOffset: "1px" }
-                : { background: MIST, color: "#6b7a80" }}>
+                : { background: MIST, color: "#55646a" }}>
               {s.label}
             </button>
           ))}
@@ -720,7 +720,7 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onChanged }) {
         ) : (
           proj.description
             ? <p className="text-[15px] leading-relaxed whitespace-pre-wrap" style={{ color: INK }}>{proj.description}</p>
-            : <div className="text-sm" style={{ color: "#b0b8ba" }}>No description yet.</div>
+            : <div className="text-sm" style={{ color: "#6f7d82" }}>No description yet.</div>
         )}
       </div>
 
@@ -737,11 +737,11 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onChanged }) {
           {(proj.log || []).map((l, i) => (
             <li key={i} className="flex gap-3 text-sm">
               <span className="font-mono text-xs pt-0.5 shrink-0" style={{ color: SEA }}>{l.date}</span>
-              <span>{l.note}{l.by ? <span className="text-xs ml-1" style={{ color: "#b0b8ba" }}>— {l.by}</span> : null}</span>
+              <span>{l.note}{l.by ? <span className="text-xs ml-1" style={{ color: "#6f7d82" }}>— {l.by}</span> : null}</span>
             </li>
           ))}
           {(proj.log || []).length === 0 && (
-            <li className="text-sm" style={{ color: "#8b9a9f" }}>No log entries yet. The first note is the start of this job's history.</li>
+            <li className="text-sm" style={{ color: "#5f6e74" }}>No log entries yet. The first note is the start of this job's history.</li>
           )}
         </ul>
       </div>

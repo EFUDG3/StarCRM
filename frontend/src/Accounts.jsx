@@ -18,7 +18,7 @@ const ROW_LINE = "#e4dfd3"; // subtle warm row separator (shared with the CRM ta
 
 // Status: label + a soft-tinted pill. Order doubles as the pipeline sequence.
 const STATUS = {
-  prospect:  { label: "Prospect",  bg: "#ece7df", fg: "#6b7a80" },
+  prospect:  { label: "Prospect",  bg: "#ece7df", fg: "#55646a" },
   contacted: { label: "Contacted", bg: "rgba(62,76,89,.14)",  fg: "#3E4C59" },
   active:    { label: "Active",    bg: "rgba(47,93,80,.16)",  fg: "#2b6a58" },
   sold:      { label: "Sold",      bg: "#2F5D50", fg: "#ffffff" },
@@ -191,7 +191,7 @@ export default function Accounts() {
       <section className="bg-white rounded-lg p-8 text-center border-l-4 max-w-lg mx-auto mt-8" style={{ borderColor: SEA }}>
         <Building2 size={28} style={{ color: SEA }} className="mx-auto mb-3" />
         <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "Georgia, serif" }}>Star Accounts</h2>
-        <p className="text-[15px] mb-5" style={{ color: "#4a5a60" }}>The shared hit list. Sign in with your Star account to view and edit.</p>
+        <p className="text-[15px] mb-5" style={{ color: "#343e41" }}>The shared hit list. Sign in with your Star account to view and edit.</p>
         <a href={api.authLoginUrl()} className="inline-flex items-center gap-2 px-5 py-2.5 rounded text-white text-sm font-medium" style={{ background: INK }}>Sign in with Microsoft</a>
       </section>
     );
@@ -226,7 +226,7 @@ export default function Accounts() {
   }
 
   const Th = ({ label, k, num }) => (
-    <th className={"px-3 py-2 font-mono text-[10px] uppercase tracking-wider select-none " + (num ? "text-right" : "text-left")} style={{ color: "#6b7a80" }}>
+    <th className={"px-3 py-2 font-mono text-[11px] uppercase tracking-wider select-none " + (num ? "text-right" : "text-left")} style={{ color: "#55646a" }}>
       <button onClick={() => setSortKey(k)} className="inline-flex items-center gap-1 hover:text-black" style={{ color: sort.key === k ? SEA : "inherit" }}>
         {label}{sort.key === k ? <ArrowUpDown size={11} /> : null}
       </button>
@@ -238,7 +238,7 @@ export default function Accounts() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="relative flex-1 min-w-56">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#8b9a9f" }} />
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#5f6e74" }} />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search company, rep, contact, email, notes"
             className="w-full bg-white border rounded pl-9 pr-3 py-2 text-sm" style={{ borderColor: BORDER }} />
         </div>
@@ -256,7 +256,7 @@ export default function Accounts() {
         </button>
       </div>
 
-      <div className="text-xs mb-2" style={{ color: "#8b9a9f" }}>
+      <div className="text-xs mb-2" style={{ color: "#5f6e74" }}>
         {rows.length} account{rows.length === 1 ? "" : "s"}{view === "mine" ? " assigned to you" : view === "unassigned" ? " with no rep" : ""}
         {" · "}{sort.key === "units" ? "ranked by units" : sort.key === "props" ? "ranked by properties" : sort.key === "name" ? "sorted by name" : "sorted by last updated"}{sort.dir === "asc" ? " (asc)" : ""}
       </div>
@@ -267,11 +267,11 @@ export default function Accounts() {
           <thead>
             <tr style={{ borderBottom: "1px solid " + BORDER }}>
               <Th label="Account" k="name" />
-              <th className="px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-left" style={{ color: "#6b7a80" }}>Rep</th>
-              <th className="px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-left" style={{ color: "#6b7a80" }}>Phone</th>
+              <th className="px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-left" style={{ color: "#55646a" }}>Rep</th>
+              <th className="px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-left" style={{ color: "#55646a" }}>Phone</th>
               <Th label="Props" k="props" num />
               <Th label="Units" k="units" num />
-              <th className="px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-left" style={{ color: "#6b7a80" }}>Status</th>
+              <th className="px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-left" style={{ color: "#55646a" }}>Status</th>
               <Th label="Updated" k="updated" />
             </tr>
           </thead>
@@ -298,7 +298,7 @@ export default function Accounts() {
                         </span>
                       )}
                     </div>
-                    {a.addresses?.[0] && <div className="text-xs truncate" style={{ color: "#8b9a9f", maxWidth: "18rem" }}>{a.addresses[0]}</div>}
+                    {a.addresses?.[0] && <div className="text-xs truncate" style={{ color: "#5f6e74", maxWidth: "18rem" }}>{a.addresses[0]}</div>}
                   </td>
                   <td className="px-3 py-2.5">
                     {a.rep ? (
@@ -306,14 +306,14 @@ export default function Accounts() {
                         <span className="w-5 h-5 rounded-full text-white text-[9px] font-bold flex items-center justify-center" style={{ background: repColor(a.rep) }}>{repInitials(a.rep)}</span>
                         <span className="text-[13px]">{a.rep}</span>
                       </span>
-                    ) : <span className="text-xs" style={{ color: "#b0b8ba" }}>unassigned</span>}
+                    ) : <span className="text-xs" style={{ color: "#6f7d82" }}>unassigned</span>}
                   </td>
-                  <td className="px-3 py-2.5 font-mono text-[12px] whitespace-nowrap" style={{ color: "#4a5a60" }}>{a.phone || "—"}</td>
-                  <td className="px-3 py-2.5 text-right font-mono text-[13px] tabular-nums" style={{ color: "#4a5a60" }}>
-                    {a.numProperties != null ? a.numProperties.toLocaleString() : <span style={{ color: "#b0b8ba" }}>—</span>}
+                  <td className="px-3 py-2.5 font-mono text-[12px] whitespace-nowrap" style={{ color: "#343e41" }}>{a.phone || "—"}</td>
+                  <td className="px-3 py-2.5 text-right font-mono text-[13px] tabular-nums" style={{ color: "#343e41" }}>
+                    {a.numProperties != null ? a.numProperties.toLocaleString() : <span style={{ color: "#6f7d82" }}>—</span>}
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono text-[13px] font-semibold tabular-nums" style={{ color: INK }}>
-                    {a.totalUnits != null ? a.totalUnits.toLocaleString() : <span style={{ color: "#b0b8ba" }}>—</span>}
+                    {a.totalUnits != null ? a.totalUnits.toLocaleString() : <span style={{ color: "#6f7d82" }}>—</span>}
                   </td>
                   <td className="px-3 py-2.5">
                     <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: st.bg, color: st.fg }}>{st.label}</span>
@@ -321,16 +321,16 @@ export default function Accounts() {
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     {a.updated ? (
                       <div>
-                        <div className="font-mono text-[12px] tabular-nums" style={{ color: "#6b7a80" }}>{fmtUpdated(a.updated)}</div>
-                        {a.updatedBy && a.updatedBy !== "seed" && <div className="text-[10px]" style={{ color: "#b0b8ba" }}>{a.updatedBy}</div>}
+                        <div className="font-mono text-[12px] tabular-nums" style={{ color: "#55646a" }}>{fmtUpdated(a.updated)}</div>
+                        {a.updatedBy && a.updatedBy !== "seed" && <div className="text-[10px]" style={{ color: "#6f7d82" }}>{a.updatedBy}</div>}
                       </div>
-                    ) : <span className="text-xs" style={{ color: "#b0b8ba" }}>—</span>}
+                    ) : <span className="text-xs" style={{ color: "#6f7d82" }}>—</span>}
                   </td>
                 </tr>
               );
             })}
             {rows.length === 0 && (
-              <tr><td colSpan={7} className="text-sm text-center py-10" style={{ color: "#8b9a9f" }}>No accounts match. Clear the search or add one.</td></tr>
+              <tr><td colSpan={7} className="text-sm text-center py-10" style={{ color: "#5f6e74" }}>No accounts match. Clear the search or add one.</td></tr>
             )}
           </tbody>
         </table>
@@ -421,7 +421,7 @@ function AccountForm({ initial, users, onCancel, onSave, onDelete, saveState }) 
           <ChevronLeft size={14} /> All accounts
         </button>
         <div className="flex items-center gap-2">
-          {form.id && <button onClick={() => onDelete(form.id)} className="p-2 rounded hover:bg-stone-100" style={{ color: TIDE }} title="Delete account"><Trash2 size={16} /></button>}
+          {form.id && <button onClick={() => onDelete(form.id)} className="p-3 rounded hover:bg-stone-100" style={{ color: TIDE }} title="Delete account"><Trash2 size={16} /></button>}
         </div>
       </div>
       <h2 className="text-2xl font-bold mb-4" style={{ fontFamily: "Georgia, serif" }}>{form.id ? "Edit account" : "New account"}</h2>
@@ -491,21 +491,21 @@ function AccountForm({ initial, users, onCancel, onSave, onDelete, saveState }) 
         {attachOpen && (
           <div className="mb-3 rounded border p-3" style={{ borderColor: BORDER, background: MIST }}>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium" style={{ color: "#4a5a60" }}>Pick one of your personal CRM contacts — it becomes visible to the whole team on this account.</span>
-              <button onClick={() => setAttachOpen(false)} className="p-1 rounded hover:bg-white" style={{ color: INK }}><X size={14} /></button>
+              <span className="text-xs font-medium" style={{ color: "#343e41" }}>Pick one of your personal CRM contacts — it becomes visible to the whole team on this account.</span>
+              <button onClick={() => setAttachOpen(false)} className="p-2 rounded hover:bg-white" style={{ color: INK }}><X size={14} /></button>
             </div>
             <input autoFocus value={attachQ} onChange={(e) => setAttachQ(e.target.value)} placeholder="Search your contacts…" className="w-full bg-white border rounded px-3 py-1.5 text-sm mb-2" style={bc} />
             {personal === null ? (
-              <div className="text-xs py-2" style={{ color: "#8b9a9f" }}>Loading your contacts…</div>
+              <div className="text-xs py-2" style={{ color: "#5f6e74" }}>Loading your contacts…</div>
             ) : attachRows.length === 0 ? (
-              <div className="text-xs py-2" style={{ color: "#8b9a9f" }}>No matches.</div>
+              <div className="text-xs py-2" style={{ color: "#5f6e74" }}>No matches.</div>
             ) : (
               <ul className="space-y-1">
                 {attachRows.map((c) => (
                   <li key={c.id}>
                     <button onClick={() => attach(c)} className="w-full text-left bg-white rounded px-3 py-1.5 hover:shadow-sm flex items-center justify-between" style={{ border: "1px solid " + BORDER }}>
-                      <span className="text-sm"><b>{c.name}</b>{c.company ? <span style={{ color: "#8b9a9f" }}> · {c.company}</span> : null}</span>
-                      <span className="font-mono text-[11px]" style={{ color: "#8b9a9f" }}>{c.email}</span>
+                      <span className="text-sm"><b>{c.name}</b>{c.company ? <span style={{ color: "#5f6e74" }}> · {c.company}</span> : null}</span>
+                      <span className="font-mono text-[11px]" style={{ color: "#5f6e74" }}>{c.email}</span>
                     </button>
                   </li>
                 ))}
@@ -515,7 +515,7 @@ function AccountForm({ initial, users, onCancel, onSave, onDelete, saveState }) 
         )}
 
         {form.contacts.length === 0 && !attachOpen && (
-          <div className="text-sm rounded p-3" style={{ background: MIST, color: "#8b9a9f" }}>No contacts yet. Add one, or attach a personal contact.</div>
+          <div className="text-sm rounded p-3" style={{ background: MIST, color: "#5f6e74" }}>No contacts yet. Add one, or attach a personal contact.</div>
         )}
 
         <div className="space-y-3">
@@ -523,7 +523,7 @@ function AccountForm({ initial, users, onCancel, onSave, onDelete, saveState }) 
             <div key={i} className="rounded border p-3" style={{ borderColor: BORDER }}>
               <div className="flex items-center justify-between mb-2">
                 <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: SEA }}>Contact {i + 1}</span>
-                <button onClick={() => removeContact(i)} className="p-1 rounded hover:bg-stone-100" style={{ color: TIDE }} title="Remove contact"><Trash2 size={14} /></button>
+                <button onClick={() => removeContact(i)} className="p-2 rounded hover:bg-stone-100" style={{ color: TIDE }} title="Remove contact"><Trash2 size={14} /></button>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <input className={field} style={bc} placeholder="Name" value={c.name} maxLength={200} autoComplete="off" onChange={setContact(i, "name")} />
@@ -635,7 +635,7 @@ function AccountDetail({ account, onBack, onEdit, onDelete, onChanged }) {
           <button onClick={onEdit} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium" style={{ background: "white", color: INK, border: "1px solid " + BORDER }}>
             <Pencil size={14} /> Edit
           </button>
-          <button onClick={() => onDelete(acct.id)} className="p-2 rounded hover:bg-stone-100" style={{ color: TIDE }} title="Delete account"><Trash2 size={16} /></button>
+          <button onClick={() => onDelete(acct.id)} className="p-3 rounded hover:bg-stone-100" style={{ color: TIDE }} title="Delete account"><Trash2 size={16} /></button>
         </div>
       </div>
 
@@ -643,10 +643,10 @@ function AccountDetail({ account, onBack, onEdit, onDelete, onChanged }) {
         <h2 className="text-2xl font-bold break-words" style={{ fontFamily: "Georgia, serif", maxWidth: "34rem" }}>{acct.name}</h2>
         <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: st.bg, color: st.fg }}>{st.label}</span>
       </div>
-      <div className="flex items-center gap-3 flex-wrap text-sm mb-4" style={{ color: "#4a5a60" }}>
+      <div className="flex items-center gap-3 flex-wrap text-sm mb-4" style={{ color: "#343e41" }}>
         {acct.rep
           ? <span className="inline-flex items-center gap-1.5"><span className="w-5 h-5 rounded-full text-white text-[9px] font-bold flex items-center justify-center" style={{ background: repColor(acct.rep) }}>{repInitials(acct.rep)}</span>{acct.rep}</span>
-          : <span style={{ color: "#b0b8ba" }}>Unassigned</span>}
+          : <span style={{ color: "#6f7d82" }}>Unassigned</span>}
         {acct.phone && <span className="inline-flex items-center gap-1"><Phone size={13} style={{ color: SEA }} />{acct.phone}</span>}
         {acct.website && <a href={acct.website} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline" style={{ color: SEA }}><Globe size={13} />{hostOf(acct.website)}</a>}
         {acct.totalUnits != null && <span className="font-mono text-xs">{acct.totalUnits.toLocaleString()} units{acct.numProperties != null ? ` · ${acct.numProperties} props` : ""}</span>}
@@ -655,7 +655,7 @@ function AccountDetail({ account, onBack, onEdit, onDelete, onChanged }) {
       {(acct.addresses || []).length > 0 && (
         <div className="mb-3">
           <div className={cap} style={{ color: SEA }}>Addresses</div>
-          <ul className="text-sm space-y-0.5">{acct.addresses.map((ad, i) => <li key={i} style={{ color: "#4a5a60" }}>{ad}</li>)}</ul>
+          <ul className="text-sm space-y-0.5">{acct.addresses.map((ad, i) => <li key={i} style={{ color: "#343e41" }}>{ad}</li>)}</ul>
         </div>
       )}
 
@@ -666,7 +666,7 @@ function AccountDetail({ account, onBack, onEdit, onDelete, onChanged }) {
         </div>
         {(acct.emails || []).length > 0
           ? <ul className="text-sm space-y-0.5">{acct.emails.map((em, i) => <li key={i}><a href={"mailto:" + em} className="underline" style={{ color: SEA }}>{em}</a></li>)}</ul>
-          : <div className="text-sm" style={{ color: "#b0b8ba" }}>None yet.</div>}
+          : <div className="text-sm" style={{ color: "#6f7d82" }}>None yet.</div>}
         {addEmail && (
           <div className="flex gap-2 mt-2">
             <input autoFocus className={field} style={bc} type="email" maxLength={254} autoComplete="off" placeholder="name@company.com" value={emailDraft} onChange={(e) => setEmailDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveEmail()} />
@@ -683,15 +683,15 @@ function AccountDetail({ account, onBack, onEdit, onDelete, onChanged }) {
         <div className="space-y-1.5">
           {(acct.contacts || []).map((c) => (
             <div key={c.id || c.name} className="rounded border p-2.5" style={{ borderColor: BORDER }}>
-              <div className="text-sm font-semibold">{c.name}{c.role ? <span className="font-normal" style={{ color: "#8b9a9f" }}> · {c.role}</span> : null}</div>
+              <div className="text-sm font-semibold">{c.name}{c.role ? <span className="font-normal" style={{ color: "#5f6e74" }}> · {c.role}</span> : null}</div>
               <div className="flex gap-3 flex-wrap mt-0.5 text-[13px]">
                 {c.email && <a href={"mailto:" + c.email} className="underline inline-flex items-center gap-1" style={{ color: SEA }}><Mail size={12} />{c.email}</a>}
-                {c.phone && <span className="inline-flex items-center gap-1" style={{ color: "#4a5a60" }}><Phone size={12} />{c.phone}</span>}
+                {c.phone && <span className="inline-flex items-center gap-1" style={{ color: "#343e41" }}><Phone size={12} />{c.phone}</span>}
               </div>
-              {c.address && <div className="text-xs mt-0.5" style={{ color: "#8b9a9f" }}>{c.address}</div>}
+              {c.address && <div className="text-xs mt-0.5" style={{ color: "#5f6e74" }}>{c.address}</div>}
             </div>
           ))}
-          {(acct.contacts || []).length === 0 && !addContact && <div className="text-sm" style={{ color: "#b0b8ba" }}>No contacts yet.</div>}
+          {(acct.contacts || []).length === 0 && !addContact && <div className="text-sm" style={{ color: "#6f7d82" }}>No contacts yet.</div>}
         </div>
         {addContact && (
           <div className="rounded border p-3 mt-2" style={{ borderColor: BORDER, background: MIST }}>
@@ -723,7 +723,7 @@ function AccountDetail({ account, onBack, onEdit, onDelete, onChanged }) {
             </div>
           </div>
         ) : (
-          acct.notes ? <p className="text-[15px] leading-relaxed whitespace-pre-wrap" style={{ color: INK }}>{acct.notes}</p> : <div className="text-sm" style={{ color: "#b0b8ba" }}>No notes yet.</div>
+          acct.notes ? <p className="text-[15px] leading-relaxed whitespace-pre-wrap" style={{ color: INK }}>{acct.notes}</p> : <div className="text-sm" style={{ color: "#6f7d82" }}>No notes yet.</div>
         )}
       </div>
 
@@ -737,10 +737,10 @@ function AccountDetail({ account, onBack, onEdit, onDelete, onChanged }) {
           {(acct.log || []).map((l, i) => (
             <li key={i} className="flex gap-3 text-sm">
               <span className="font-mono text-xs pt-0.5 shrink-0" style={{ color: SEA }}>{l.date}</span>
-              <span>{l.note}{l.by ? <span className="text-xs ml-1" style={{ color: "#b0b8ba" }}>— {l.by}</span> : null}</span>
+              <span>{l.note}{l.by ? <span className="text-xs ml-1" style={{ color: "#6f7d82" }}>— {l.by}</span> : null}</span>
             </li>
           ))}
-          {(acct.log || []).length === 0 && <li className="text-sm" style={{ color: "#8b9a9f" }}>No activity yet. Log the first note above.</li>}
+          {(acct.log || []).length === 0 && <li className="text-sm" style={{ color: "#5f6e74" }}>No activity yet. Log the first note above.</li>}
         </ul>
       </div>
     </section>
