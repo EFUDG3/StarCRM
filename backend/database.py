@@ -42,7 +42,16 @@ if not DATABASE_URL.startswith("postgresql"):
 
 # pool_pre_ping recycles connections that a managed Postgres (e.g. Azure) may
 # have dropped while idle, avoiding stale-connection errors on the next request.
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+# connect_timeout bounds how long a NEW connection may block. Without it, an
+# unreachable host (most often a local client IP that has dropped out of the
+# Azure Postgres firewall) hangs on the TCP connect with no error at all, which
+# reads as "the app froze" rather than "the database is unreachable".
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    future=True,
+    connect_args={"connect_timeout": 10},
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 Base = declarative_base()
 

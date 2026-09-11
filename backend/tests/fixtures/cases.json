@@ -1,0 +1,513 @@
+[
+  {
+    "name": "empty thread is closed",
+    "trail": [],
+    "expect": "resolved",
+    "expect_decided_by": "structural:empty"
+  },
+  {
+    "name": "note to yourself from phone",
+    "trail": [
+      "in"
+    ],
+    "sender_email": "ethan@starflooringandremodeling.com",
+    "subject": "",
+    "snippet": "pick up transition strips",
+    "expect": "resolved",
+    "expect_decided_by": "structural:self-note"
+  },
+  {
+    "name": "you replied last, ball is theirs",
+    "trail": [
+      "in:toMe",
+      "out"
+    ],
+    "sender_email": "marc@example.com",
+    "subject": "Quote for Building 4",
+    "snippet": "Sending the quote over now.",
+    "expect": "waiting",
+    "expect_decided_by": "structural:you-spoke-last"
+  },
+  {
+    "name": "LinkedIn verification code (toMe alone must not top the lane)",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "LinkedIn",
+    "sender_email": "security-noreply@linkedin.com",
+    "subject": "Here's your verification code",
+    "snippet": "Your code is 401288. It expires in 15 minutes.",
+    "expect": "bulk",
+    "expect_decided_by": "tier1:bulk-subject"
+  },
+  {
+    "name": "newsletter with unsubscribe copy",
+    "trail": [
+      "in"
+    ],
+    "sender_name": "Flooring Weekly",
+    "sender_email": "editor@flooringweekly.example.com",
+    "subject": "This week in LVP",
+    "snippet": "Top stories inside. Unsubscribe at any time.",
+    "expect": "bulk",
+    "expect_decided_by": "tier1:bulk-copy"
+  },
+  {
+    "name": "no-reply sender alone is NOT enough for cleanup",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Concur",
+    "sender_email": "no-reply@concur.example.com",
+    "subject": "Expense report submitted",
+    "snippet": "Your report was received.",
+    "expect": "fyi",
+    "expect_decided_by": "tier1:automated-notification"
+  },
+  {
+    "name": "out of office auto-reply",
+    "trail": [
+      "out",
+      "in:toMe"
+    ],
+    "sender_name": "Olga Ramirez",
+    "sender_email": "olga@example.com",
+    "subject": "Automatic reply: Building 4 walkthrough",
+    "snippet": "I am out of the office until Monday.",
+    "expect": "fyi",
+    "expect_decided_by": "tier1:ooo"
+  },
+  {
+    "name": "DataNet closed ticket (closure must beat the ticket rule)",
+    "trail": [
+      "out",
+      "in:toMe"
+    ],
+    "sender_name": "DataNet Support",
+    "sender_email": "support@datanet.example.com",
+    "subject": "Ticket #4412 has been resolved",
+    "snippet": "This ticket has been resolved and closed. No further action is needed.",
+    "expect": "resolved",
+    "expect_decided_by": "tier1:closure"
+  },
+  {
+    "name": "DataNet informational ticket update goes to judgment",
+    "trail": [
+      "out",
+      "in:toMe"
+    ],
+    "sender_name": "DataNet Support",
+    "sender_email": "support@datanet.example.com",
+    "subject": "A Response to your Ticket #4419",
+    "snippet": "A technician has been assigned and will review the printer queue.",
+    "expect": "model",
+    "expect_decided_by": "tier2:ticket-update"
+  },
+  {
+    "name": "DataNet ticket that asks a real question goes to judgment",
+    "trail": [
+      "out",
+      "in:toMe"
+    ],
+    "sender_name": "DataNet Support",
+    "sender_email": "support@datanet.example.com",
+    "subject": "A Response to your Ticket #4420",
+    "snippet": "Can you confirm which workstation is affected so we can dispatch?",
+    "expect": "model",
+    "expect_decided_by": "tier2:ticket-update"
+  },
+  {
+    "name": "got it thanks closes the thread",
+    "trail": [
+      "in:toMe",
+      "out",
+      "in:toMe"
+    ],
+    "sender_name": "Marc Delgado",
+    "sender_email": "marc@example.com",
+    "subject": "Building 4 quote",
+    "snippet": "Got it, thanks!",
+    "expect": "resolved",
+    "expect_decided_by": "tier2:ack"
+  },
+  {
+    "name": "thanks plus a real instruction is NOT resolved",
+    "trail": [
+      "out",
+      "in:toMe"
+    ],
+    "sender_name": "Marc Delgado",
+    "sender_email": "marc@example.com",
+    "subject": "Building 4 quote",
+    "snippet": "Thanks, also send the invoice over to accounting.",
+    "expect": "model",
+    "expect_decided_by": "tier2:answered-statement"
+  },
+  {
+    "name": "colleague replied and you were only copied",
+    "trail": [
+      "out",
+      "in:ccMe"
+    ],
+    "sender_name": "LeighAnn Torres",
+    "sender_email": "leighann@starflooringandremodeling.com",
+    "subject": "Mission Valley schedule",
+    "snippet": "I already sent them the updated crew schedule.",
+    "expect": "fyi",
+    "expect_decided_by": "tier2:colleague-covered"
+  },
+  {
+    "name": "colleague replied but you were addressed",
+    "trail": [
+      "out",
+      "in:toMe"
+    ],
+    "sender_name": "LeighAnn Torres",
+    "sender_email": "leighann@starflooringandremodeling.com",
+    "subject": "Mission Valley schedule",
+    "snippet": "I sent part of it over, the rest is on your side.",
+    "expect": "model",
+    "expect_decided_by": "tier2:colleague-verify"
+  },
+  {
+    "name": "cold marketing pitch stays out of the reply lane",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Abacus AI",
+    "sender_email": "growth@abacus.example.com",
+    "subject": "Cut your reporting time in half",
+    "snippet": "Hi there, do you have 15 minutes on Thursday for a quick demo?",
+    "expect": "model",
+    "expect_decided_by": "tier2:cold-outreach"
+  },
+  {
+    "name": "support mailbox greeting you by name is judged, not tasked",
+    "trail": [
+      "in:toMe",
+      "out",
+      "in:toMe"
+    ],
+    "sender_name": "Superhuman Support",
+    "sender_email": "support@superhuman.example.com",
+    "subject": "How did we do?",
+    "snippet": "Hi Ethan, did we resolve your issue today?",
+    "expect": "model",
+    "expect_decided_by": "tier2:robot-sender"
+  },
+  {
+    "name": "recorder bot nag",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Read AI",
+    "sender_email": "support@read.ai",
+    "subject": "Your meeting summary is ready",
+    "snippet": "Here is your summary for Tuesday's sales meeting.",
+    "expect": "bulk",
+    "expect_decided_by": "tier2:recorder-bot"
+  },
+  {
+    "name": "hit-list account asking a direct question",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Belinda Torres",
+    "sender_email": "belinda@conam.com",
+    "subject": "Carpet replacement at Building 4",
+    "snippet": "Can you send the quote for Building 4 before Friday?",
+    "expect": "needs_reply",
+    "expect_decided_by": "score:evidence"
+  },
+  {
+    "name": "flagged mail always reaches the reply lane",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Unknown Vendor",
+    "sender_email": "rep@vendor.example.com",
+    "subject": "Pricing sheet",
+    "snippet": "Attached is our current pricing.",
+    "flagged": true,
+    "expect": "needs_reply",
+    "expect_decided_by": "score:evidence"
+  },
+  {
+    "name": "already replied in another thread",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Marc Delgado",
+    "sender_email": "marc@example.com",
+    "subject": "Punch list for Mission Valley",
+    "snippet": "Ethan, can you confirm the punch list is closed out?",
+    "age_days": 5,
+    "outbound_map": {
+      "marc@example.com": [
+        "2099-01-01T00:00:00Z"
+      ]
+    },
+    "expect": "fyi",
+    "expect_decided_by": "tier2:replied-elsewhere"
+  },
+  {
+    "name": "internal colleague starting a thread with you",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Salam Ayoub",
+    "sender_email": "salam@starflooringandremodeling.com",
+    "subject": "Mileage report format",
+    "snippet": "Can you get me the updated mileage sheet today?",
+    "expect": "needs_reply",
+    "expect_decided_by": "score:evidence"
+  },
+  {
+    "name": "REAL: SB certification compliance notice (was bulk, needed action)",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "donotreply",
+    "sender_email": "donotreply@fiscal.ca.gov",
+    "subject": "SB Certification Compliance Notice",
+    "snippet": "August 25, 2026 Certification ID 1755373 Hasenin Enterprises LLC 4610 Alvarado Canyon Rd Suite 1 San Diego, CA 92120 RESPONSE NEEDED Subject: Small Business (SB) Certification Compliance Notice Dear Salam Hasenin: The Office of Small Business and DVBE Services (OSDS) performs periodic",
+    "user": "salam",
+    "expect": "needs_reply",
+    "expect_decided_by": "tier1:action-required"
+  },
+  {
+    "name": "REAL: Paychex Secure 2.0 amendment needing a wet signature (was bulk)",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Paychex Inc.",
+    "sender_email": "noreply@paychex.com",
+    "subject": "Action required: Print and sign your Secure 2.0 termination amendment",
+    "snippet": "To view this email as a web page, click here SECURE 2.0 Termination Amendment Our records indicate that you terminated your 401(k) plan with Paychex on or after Dec. 29, 2022. As your former retirement services provider, we are required to provide you with the updated SECURE 2.0",
+    "user": "salam",
+    "expect": "needs_reply",
+    "expect_decided_by": "tier1:action-required"
+  },
+  {
+    "name": "REAL: SDUSD ad for bids (was bulk, is inbound revenue)",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "SDUSD",
+    "sender_email": "no-reply@reproconnect.com",
+    "subject": "Ad for bids_ Group C Shade",
+    "snippet": "Ad for bids_ Group C Shade From SDUSD To STAR FLOORING & REMODELING Project San Diego USD - CC27-0311-52-00-00 Attachment Ad for Bids CC27-0311-52-00-00 Group 5C Shade Shelters at 4 sites.pdf View project online and submit your response Project Name: San Diego USD",
+    "user": "salam",
+    "expect": "needs_reply",
+    "expect_decided_by": "tier1:bid-invitation"
+  },
+  {
+    "name": "REAL: Anthropic receipt (was bulk, should stay visible)",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Anthropic, PBC",
+    "sender_email": "invoice+statements@mail.anthropic.com",
+    "subject": "Your receipt from Anthropic, PBC #2070-0313-0428",
+    "snippet": "Receipt from Anthropic, PBC $175.00 Paid August 13, 2026 Receipt number 2070-0313-0428 Invoice number MJMPHQLS-0006 Receipt #2070-0313-0428 Aug 13-Sep 13, 2026 Team plan - Standard Qty 7 $175.00 Total $175.00",
+    "user": "salam",
+    "expect": "fyi",
+    "expect_decided_by": "tier1:financial-record"
+  },
+  {
+    "name": "REAL: RingPlan vendor thread, Cc'd on 8 messages (was bulk on 'Welcome to')",
+    "trail": [
+      "in:ccMe",
+      "in:ccMe",
+      "in:ccMe",
+      "in:ccMe",
+      "in:ccMe",
+      "in:ccMe",
+      "in:ccMe",
+      "in:ccMe"
+    ],
+    "sender_name": "Michael Soriano",
+    "sender_email": "msoriano@ztelco.com",
+    "subject": "Re: Action Required:Star Flooring And Remodeling-OR52503-Welcome to RingPlan!",
+    "snippet": "Hi Olga, Could you please confirm if your electrician has completed all the required work on your end? Thanks, Michael Soriano Project Manager",
+    "user": "salam",
+    "expect": "fyi",
+    "expect_decided_by": "tier1:cc-bystander"
+  },
+  {
+    "name": "REAL: Bob sends the T&M template to his boss (was fyi, needed a reply)",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Bob Bendixen",
+    "sender_email": "bob@starflooringandremodeling.com",
+    "subject": "T&M TICKET TEMPLATE",
+    "snippet": "Here you go Boss ... 1 is job specific for Zuma Very Respectfully, Bob Bendixen Superintendent/Project Manager Star Flooring and Remodeling",
+    "user": "salam",
+    "expect": "needs_reply",
+    "expect_decided_by": "score:evidence"
+  },
+  {
+    "name": "REAL: Chase cards briefing, internal, question past the snippet cap (was fyi)",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Ethan Fudge",
+    "sender_email": "ethan@starflooringandremodeling.com",
+    "subject": "Chase Banking Cards",
+    "snippet": "Hi Salam, Here is a full breakdown of everything I have gathered from card research. On February 17, Chase changed their alert policy: they stopped sending push notifications and texts for online, recurring, and phone/mail-order charges because it is treated as a pre-approved",
+    "user": "salam",
+    "expect": "needs_reply",
+    "expect_decided_by": "score:evidence"
+  },
+  {
+    "name": "REAL: Updated Drawing, deposit still owed by us (was fyi via answered-statement)",
+    "trail": [
+      "in:toMe",
+      "out",
+      "in:toMe",
+      "out",
+      "in:toMe"
+    ],
+    "sender_name": "David Jenkins",
+    "sender_email": "david@whequip.com",
+    "subject": "RE: Updated Drawing",
+    "snippet": "Salam, I just replied to the latest email I had on the topic. I would expect it around 3 weeks from now, assuming the deposit gets sent soon. David",
+    "user": "salam",
+    "expect": "needs_reply",
+    "expect_decided_by": "tier1:pending-on-us"
+  },
+  {
+    "name": "REAL: cold sales bump to Bob, legacy rules on (was needs_reply)",
+    "trail": [
+      "in:toMe",
+      "in:toMe"
+    ],
+    "sender_name": "Justin Bullerjahn",
+    "sender_email": "justin.bull@austriandigitalagency.com",
+    "subject": "Hi there Bob",
+    "snippet": "Hello Bob, Wanted to bump this up in your inbox. Any interest in qualified bathroom remodel appointments where you only pay for the ones you take? Justin Bullerjahn",
+    "user": "bob",
+    "expect": "model",
+    "expect_decided_by": "tier2:cold-outreach"
+  },
+  {
+    "name": "REAL: same cold sales bump on a fresh inbox has no cold rule to catch it",
+    "trail": [
+      "in:toMe",
+      "in:toMe"
+    ],
+    "sender_name": "Justin Bullerjahn",
+    "sender_email": "justin.bull@austriandigitalagency.com",
+    "subject": "Hi there Bob",
+    "snippet": "Hello Bob, Wanted to bump this up in your inbox. Any interest in qualified bathroom remodel appointments where you only pay for the ones you take? Justin Bullerjahn",
+    "user": "bob",
+    "active_rules": "tier1",
+    "expect": "needs_reply",
+    "expect_decided_by": "score:evidence"
+  },
+  {
+    "name": "GEN: COI expiry, wording the phrase list does NOT know \u2014 must stay visible",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Certificates",
+    "sender_email": "no-reply@carrierportal.example.com",
+    "subject": "Certificate of insurance on file expires 10/01/2026",
+    "snippet": "The certificate of insurance we have on file for Star Flooring and Remodeling expires 10/01/2026. A current certificate is required to remain an approved vendor. Upload a replacement through the vendor portal.",
+    "user": "salam",
+    "expect": "fyi",
+    "expect_decided_by": "tier1:automated-notification"
+  },
+  {
+    "name": "GEN: contractor license renewal with a deadline",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "CSLB",
+    "sender_email": "donotreply@cslb.ca.gov",
+    "subject": "License renewal notice",
+    "snippet": "Your contractor license expires 11/30/2026. The renewal application and fee must be submitted on or before 11/30/2026 to avoid suspension of your license.",
+    "user": "salam",
+    "expect": "needs_reply",
+    "expect_decided_by": "tier1:action-required"
+  },
+  {
+    "name": "GEN: workers comp premium audit request",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Audit Services",
+    "sender_email": "noreply@statefund.example.com",
+    "subject": "Annual premium audit - documentation request",
+    "snippet": "Our annual premium audit is underway for policy 9004412. Please complete and return the attached payroll worksheet. Failure to respond may result in an estimated audit.",
+    "user": "salam",
+    "expect": "needs_reply",
+    "expect_decided_by": "tier1:action-required"
+  },
+  {
+    "name": "GEN: W-9 request from a GC's AP robot",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Accounts Payable",
+    "sender_email": "no-reply@apinvoices.example.com",
+    "subject": "Vendor onboarding: W-9 needed",
+    "snippet": "Before we can process payment we need a current W-9 on file. Please complete and return the attached form.",
+    "user": "salam",
+    "expect": "needs_reply",
+    "expect_decided_by": "tier1:action-required"
+  },
+  {
+    "name": "GEN: BuildingConnected ITB with an unsubscribe footer (bid beats double-bulk)",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "BuildingConnected",
+    "sender_email": "no-reply@buildingconnected.example.com",
+    "subject": "Invitation to Bid: Chula Vista Elementary flooring package",
+    "snippet": "You have been invited to bid on Chula Vista Elementary - flooring package. Bid due 10/14/26 2:00 pm. View the project and submit your response. Unsubscribe from these notifications.",
+    "user": "salam",
+    "expect": "needs_reply",
+    "expect_decided_by": "tier1:bid-invitation"
+  },
+  {
+    "name": "GEN: permit ready notice, informational, not a task",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "City of San Diego DSD",
+    "sender_email": "noreply@sandiego.gov",
+    "subject": "Permit PMT-2026-44120 status update",
+    "snippet": "The status of permit PMT-2026-44120 changed to Issued on 09/01/2026. You can view the record online.",
+    "user": "salam",
+    "expect": "fyi",
+    "expect_decided_by": "tier1:automated-notification"
+  },
+  {
+    "name": "PRECISION: marketing blast with unsubscribe copy is still cleanup",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "Surfaces Expo",
+    "sender_email": "no-reply@surfacesexpo.example.com",
+    "subject": "Last chance for early-bird pricing",
+    "snippet": "Register now and save $200 on your Surfaces 2027 pass. Manage your preferences or unsubscribe at any time.",
+    "user": "salam",
+    "expect": "bulk",
+    "expect_decided_by": "tier1:bulk-sender"
+  },
+  {
+    "name": "PRECISION: password reset code is still cleanup",
+    "trail": [
+      "in:toMe"
+    ],
+    "sender_name": "RollMaster",
+    "sender_email": "noreply@rollmaster.example.com",
+    "subject": "Your verification code",
+    "snippet": "Use code 884120 to finish signing in. The code expires in 10 minutes.",
+    "user": "salam",
+    "expect": "bulk",
+    "expect_decided_by": "tier1:bulk-sender"
+  }
+]

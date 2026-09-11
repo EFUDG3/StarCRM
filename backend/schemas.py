@@ -202,3 +202,37 @@ class EmailPrefIn(BaseModel):
     the one it changed."""
     digestEnabled: Optional[bool] = None
     digestHour: Optional[int] = Field(default=None, ge=5, le=12)
+
+
+class ThreadReclassifyIn(BaseModel):
+    """A correction: the user moved a thread into a different lane.
+
+    `why` is the optional one-tap chip. It costs the user one tap and roughly
+    doubles what the rule suggester can infer, because "not relevant to me"
+    and "already handled" imply very different rules from the same move."""
+    state: str = Field(pattern="^(needs_reply|fyi|resolved|bulk)$")
+    why: Optional[str] = Field(
+        default=None,
+        pattern="^(not_relevant|not_a_task|already_handled|wrong_sender_read|is_a_task)$")
+
+
+class TriageRuleIn(BaseModel):
+    """One per-user triage rule. `kind=hard` needs scope/pattern/action and
+    runs deterministically; `kind=soft` needs only `text` and rides into the
+    model prompt."""
+    kind: str = Field(default="hard", pattern="^(hard|soft)$")
+    scope: Optional[str] = Field(
+        default=None, pattern="^(sender|domain|subject|signal|sender_subject)$")
+    pattern: Optional[str] = Field(default=None, max_length=300)
+    action: Optional[str] = Field(default=None, pattern="^(force_state|promote|demote)$")
+    targetState: Optional[str] = Field(default=None, pattern="^(needs_reply|fyi|resolved|bulk)$")
+    text: Optional[str] = Field(default=None, max_length=500)
+    note: Optional[str] = Field(default=None, max_length=200)
+    active: Optional[bool] = None
+
+
+class TriageProfileIn(BaseModel):
+    """The user's "about my job" paragraph plus the set of COMPANY rules they
+    have switched on. `companyRules` is the full desired list, not a delta."""
+    profile: Optional[str] = Field(default=None, max_length=2000)
+    companyRules: Optional[list[str]] = None

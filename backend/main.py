@@ -20,6 +20,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect as sa_inspect, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 import accounts
@@ -34,7 +36,8 @@ import models  # noqa: F401 (ensures models are registered on Base)
 import projects
 import tasks
 import telemetry
-from database import Base, engine, get_db
+import triage_feedback
+from database import DATABASE_URL, Base, engine, get_db
 from models import Contact, Interaction, User
 from schemas import ChatIn, ContactIn, LogIn, TodoIn, TodoPatch, UserIn
 from seed import SEED_CONTACTS
@@ -97,9 +100,50 @@ def _ensure_schema() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_dismissed_user_msg "
             "ON dismissed_emails (user_id, message_id)"
         ))
+        # Email triage feedback loop (2026-09-02). The signal set + deciding
+        # rule are stored per thread so a correction can be replayed against
+        # the facts the engine actually saw; without them every correction is
+        # a guess about which of a dozen rules misfired.
+        conn.execute(text("ALTER TABLE email_threads ADD COLUMN IF NOT EXISTS signals_json TEXT DEFAULT '{}'"))
+        conn.execute(text("ALTER TABLE email_threads ADD COLUMN IF NOT EXISTS decided_by VARCHAR DEFAULT ''"))
+        conn.execute(text("ALTER TABLE email_threads ADD COLUMN IF NOT EXISTS manual_msg_id VARCHAR DEFAULT ''"))
+        # Per-user rule scoping. NULL triage_rules_json means "not initialized"
+        # -> tier-1 mechanical rules only, so a new inbox never inherits
+        # another person's judgment rules.
+        conn.execute(text("ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS triage_rules_json TEXT"))
+        conn.execute(text("ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS triage_profile TEXT DEFAULT ''"))
+        # One open suggestion per user+pattern: keeps the suggester from
+        # proposing the same rule twice while an earlier card is still pending.
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_triage_sugg_user_pattern "
+            "ON triage_suggestions (user_id, scope, pattern, action)"
+        ))
 
 
-_ensure_schema()
+def _ensure_schema_or_explain() -> None:
+    """Run the schema migration, turning an unreachable database into a message
+    that says what to do about it.
+
+    _ensure_schema() used to run at MODULE scope, which meant the very first
+    thing an import did was open a database connection. When the database was
+    unreachable that import blocked, so uvicorn never bound its port and never
+    logged "Application startup complete": no traceback, no error, just a
+    process that appeared to hang after "Started reloader process". Running it
+    here (from the lifespan) lets the server bind first and fail loudly.
+    """
+    try:
+        _ensure_schema()
+    except OperationalError as e:
+        host = make_url(DATABASE_URL).host or "(unknown host)"
+        raise RuntimeError(
+            f"Cannot reach the database at {host}. The app cannot start.\n"
+            "Locally, the usual cause is that your public IP changed and is no "
+            "longer in the Azure Postgres firewall: Portal -> star-crm-pg -> "
+            "Networking -> '+ Add current client IP address' -> Save.\n"
+            "Other candidates: the server is stopped/paused, DATABASE_URL is "
+            "wrong, or the password was rotated.\n"
+            f"Underlying error: {e.orig}"
+        ) from e
 
 
 # Build the Claude connector (MCP) sub-app BEFORE creating the FastAPI app, so
@@ -119,8 +163,11 @@ except Exception as _mcp_err:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup/shutdown. Seeds the demo profile on an empty DB and, when the
-    connector is mounted, runs the MCP session manager's lifespan."""
+    """Startup/shutdown. Applies the additive schema migration, seeds the demo
+    profile on an empty DB and, when the connector is mounted, runs the MCP
+    session manager's lifespan. Schema work happens HERE rather than at import
+    so an unreachable database is a startup error, not a silent hang."""
+    _ensure_schema_or_explain()
     _seed_on_first_run()
     if _mcp_app is not None:
         async with _mcp_app.router.lifespan_context(_mcp_app):
@@ -332,6 +379,7 @@ app.include_router(mileage.router)
 app.include_router(accounts.router)
 app.include_router(projects.router)
 app.include_router(email_triage.router)
+app.include_router(triage_feedback.router)
 app.include_router(digest.router)
 app.include_router(tasks.router)
 

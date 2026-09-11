@@ -455,6 +455,17 @@ class EmailThread(Base):
     category = Column(String, default="")                # customer|vendor|internal|notification|other
     reason = Column(String, default="")                  # one line: why it ranked here (auditable)
     model_used = Column(Boolean, nullable=False, default=False)
+    # The exact signal set the engine observed, and the rule that fired. These
+    # two are what make a correction replayable: without them "this was wrong"
+    # cannot be traced to the rule that did it, and every fix is a guess.
+    signals_json = Column(Text, default="{}")
+    decided_by = Column(String, default="")              # e.g. "tier1:ooo", "user:tr0a1b", "model"
+    # The message id at the moment the user hand-moved this thread. A manual
+    # correction must SURVIVE a re-sync — otherwise re-reading the mailbox
+    # silently overwrites the user's verdict, which is the one thing the
+    # feedback loop cannot afford to do. Same semantics as dismissed_at_msg_id:
+    # the hold releases when a genuinely NEW message lands on the thread.
+    manual_msg_id = Column(String, default="")
     account_id = Column(String, nullable=True)           # matched shared account (domain match)
     account_name = Column(String, default="")
     triaged_at = Column(DateTime, server_default=func.now())
@@ -493,6 +504,17 @@ class UserPref(Base):
     )
     digest_enabled = Column(Boolean, nullable=False, default=False)
     digest_hour = Column(Integer, nullable=False, default=7)  # local (Pacific) send hour
+    # Which COMPANY triage rules this user has switched on. JSON array of rule
+    # ids from triage_engine. NULL means "never initialized" -> the engine
+    # applies tier 1 only, so a new inbox does not inherit another person's
+    # tuning. The mailbox the Aug-2026 rules were tuned against gets the full
+    # legacy set via a one-time seed.
+    triage_rules_json = Column(Text, nullable=True)
+    # A short free-text paragraph the user writes about their own job, ridden
+    # into the model prompt. For the judgment path this is worth more than ten
+    # rules: "I'm IT admin, DataNet tickets are my actual work" flips a large
+    # share of one person's verdicts on its own.
+    triage_profile = Column(Text, default="")
 
 
 class GlossaryEntry(Base):
@@ -506,3 +528,127 @@ class GlossaryEntry(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     term = Column(String, nullable=False)
     meaning = Column(String, nullable=False)
+
+
+def _triage_rule_id() -> str:
+    return "tr" + uuid.uuid4().hex[:12]
+
+
+def _triage_feedback_id() -> str:
+    return "tf" + uuid.uuid4().hex[:12]
+
+
+class TriageRule(Base):
+    """One per-user triage rule — the unit the Rules tab lists and the engine
+    evaluates ahead of every company rule.
+
+    Two kinds, routed differently on purpose:
+
+      hard  Deterministic. Matched in `triage_engine.decide()` with no model
+            call, which is what makes a rule edit re-runnable across stored
+            threads for free — the user saves a rule and the tab re-sorts.
+      soft  Judgment. Injected into the model prompt as a line of guidance
+            ("I don't need to reply to LeighAnn unless she asks directly").
+            Only reaches threads that get to the model stage.
+
+    `hit_count` is not decoration: it separates rules doing real work from
+    one-off annoyances, drives pruning suggestions, and answers "what has the
+    bot actually learned" with a number.
+
+    `source` tracks provenance — 'manual' (typed), 'suggested' (accepted from
+    a model suggestion), 'seed' (the Aug-2026 tuned set, applied only to the
+    mailbox it was tuned against)."""
+
+    __tablename__ = "triage_rules"
+
+    id = Column(String, primary_key=True, default=_triage_rule_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind = Column(String, nullable=False, default="hard")       # hard | soft
+    scope = Column(String, nullable=False, default="sender")    # sender|domain|subject|signal|sender_subject
+    pattern = Column(String, nullable=False, default="")
+    action = Column(String, nullable=False, default="demote")   # force_state|promote|demote
+    target_state = Column(String, default="")                   # when action=force_state
+    text = Column(Text, default="")                             # soft rules: the guidance line
+    note = Column(String, default="")                           # user's own label for the rule
+    source = Column(String, nullable=False, default="manual")   # manual|suggested|seed
+    active = Column(Boolean, nullable=False, default=True)
+    hit_count = Column(Integer, nullable=False, default=0)
+    last_hit_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class TriageFeedback(Base):
+    """One correction: the user moved a thread to a different lane.
+
+    The ACTION ALONE IS NOT ENOUGH to synthesize a rule from, which is the
+    whole reason this table stores a snapshot. `signals_json` is the exact
+    signal set the engine saw and `decided_by` is the rule that fired, so a
+    correction three days later can be replayed against the facts rather than
+    re-guessed. Without those two fields a suggester can only pattern-match on
+    sender address, which produces shallow rules.
+
+    `why` is the optional one-tap chip (not_relevant | not_a_task |
+    already_handled | wrong_sender_read). Four taps of user effort, and it
+    roughly doubles what the suggester can infer.
+
+    Rows outlive their thread deliberately (no FK to email_threads): threads
+    are pruned at 90 days, but the lesson a correction teaches should not be."""
+
+    __tablename__ = "triage_feedback"
+
+    id = Column(String, primary_key=True, default=_triage_feedback_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    thread_id = Column(String, default="")            # no FK: survives retention pruning
+    conversation_id = Column(String, default="")
+    # What the engine said
+    predicted_state = Column(String, default="")
+    predicted_rank = Column(Integer, default=0)
+    decided_by = Column(String, default="")           # the rule that produced the wrong verdict
+    model_used = Column(Boolean, nullable=False, default=False)
+    reason = Column(String, default="")
+    # What the user said
+    corrected_state = Column(String, default="")
+    why = Column(String, default="")                  # one-tap chip, optional
+    # The facts at decision time (this is what makes a rule derivable)
+    signals_json = Column(Text, default="{}")
+    sender_email = Column(String, default="")
+    sender_domain = Column(String, default="")
+    subject = Column(String, default="")
+    # Lifecycle: a correction is 'open' until a rule covers it, then 'ruled'.
+    # 'dismissed' means the user rejected the suggestion it produced, so the
+    # suggester must stop proposing that pattern.
+    status = Column(String, nullable=False, default="open")
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class TriageSuggestion(Base):
+    """A rule the model proposes after N corrections share a pattern.
+
+    Never auto-applied. Approval is the trust gate: a suggestion the user taps
+    Add on feels like training, whereas a rule that silently reshapes their
+    inbox is how people stop believing the tab. `evidence_json` holds the
+    correction ids behind it so the card can say "you moved 4 emails from
+    support@datanet.com out of Reply" instead of asserting a pattern the user
+    has to take on faith."""
+
+    __tablename__ = "triage_suggestions"
+
+    id = Column(String, primary_key=True, default=_triage_rule_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind = Column(String, nullable=False, default="hard")
+    scope = Column(String, nullable=False, default="sender")
+    pattern = Column(String, nullable=False, default="")
+    action = Column(String, nullable=False, default="demote")
+    target_state = Column(String, default="")
+    text = Column(Text, default="")
+    rationale = Column(String, default="")            # the "you moved 4 emails..." line
+    evidence_json = Column(Text, default="[]")        # feedback ids behind it
+    evidence_count = Column(Integer, nullable=False, default=0)
+    status = Column(String, nullable=False, default="pending")  # pending|accepted|rejected
+    created_at = Column(DateTime, server_default=func.now())

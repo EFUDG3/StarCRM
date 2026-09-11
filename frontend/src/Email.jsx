@@ -11,9 +11,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Inbox, RefreshCw, ExternalLink, Flag, Sparkles, ChevronDown, ChevronRight,
-  Building2, CheckCircle2, X, Undo2, ArrowRight, Search,
+  Building2, CheckCircle2, X, Undo2, ArrowRight, Search, SlidersHorizontal,
+  CornerUpRight, Lightbulb, Check,
 } from "lucide-react";
 import * as api from "./api.js";
+import EmailRules from "./EmailRules.jsx";
 
 const INK = "#1C1C1C";
 const MIST = "#F3F0EC";
@@ -41,6 +43,17 @@ const LANES = [
     note: "Newsletters and notifications the filter caught. Reviewing and moving these to trash arrives in a later update.",
   },
   {
+    // Added 2026-09-02. Resolved threads used to be counted but never shown,
+    // which meant a thread wrongly marked handled was invisible AND
+    // uncorrectable — the engine's worst failure had no way to be reported.
+    // Collapsed by default, so their absence from the lanes above still does
+    // the work; this is a recovery door, not a fifth inbox.
+    key: "handled", label: "Handled",
+    bg: "rgba(47,93,80,.16)", fg: "#2b6a58", open: false,
+    empty: "Nothing closed itself yet.",
+    note: "Threads that closed on their own or that you already answered. If one of these still needs you, move it back — that correction is what teaches the triage.",
+  },
+  {
     key: "dismissed", label: "Dismissed",
     bg: "rgba(62,76,89,.14)", fg: "#3E4C59", open: false,
     empty: "Nothing dismissed yet.",
@@ -48,7 +61,40 @@ const LANES = [
   },
 ];
 
+// Lane keys as the API's state values, for the row-level move control.
+const STATE_OF_LANE = {
+  needsReply: "needs_reply", fyi: "fyi", cleanup: "bulk", handled: "resolved",
+};
+const MOVE_TARGETS = [
+  { state: "needs_reply", label: "Needs your reply" },
+  { state: "fyi", label: "Worth knowing" },
+  { state: "resolved", label: "Handled" },
+  { state: "bulk", label: "Cleanup" },
+];
+// One-tap reasons. Optional, and worth asking for: "not relevant to me" and
+// "already handled" imply completely different rules from the same move, so
+// this single tap is what lets the suggester generalize correctly.
+const WHY_CHIPS = [
+  { k: "not_a_task", label: "Not a task" },
+  { k: "not_relevant", label: "Not my area" },
+  { k: "already_handled", label: "Already handled" },
+  { k: "wrong_sender_read", label: "Misread the sender" },
+  { k: "is_a_task", label: "This IS a task" },
+];
+
 const COLLAPSE_KEY = "starEmailCollapsed";
+// Set on a user's first correction. Until then the tab explains the Move
+// control once, because the feedback loop is worth nothing if the people it
+// learns from never notice the button.
+const TAUGHT_KEY = "starEmailTaughtMove";
+
+// A long lane is a lane nobody reads, and an unread lane produces no
+// corrections. Ethan's mailbox ran 71 in "Worth knowing" out of 111 visible —
+// and that is CORRECT classification, not a misfire (he gets almost no spam,
+// so most of his mail genuinely is worth-knowing). So the fix belongs in the
+// VIEW, not in the rules: show the top slice by whatever sort is active and
+// keep the rest one click away.
+const LANE_CAP = 25;
 
 const CATEGORY = {
   customer: { label: "Customer", bg: "rgba(47,93,80,.16)", fg: "#2b6a58" },
@@ -86,6 +132,16 @@ export default function EmailTab() {
   const [sort, setSort] = useState("importance"); // importance | newest | oldest
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(() => new Set()); // ids checked for bulk actions
+  // Suggestions returned by a correction. Surfaced immediately, while the
+  // user still remembers the thread that triggered them — a suggestion found
+  // three days later in a settings tab has lost its context.
+  const [suggested, setSuggested] = useState([]);
+  const [taught, setTaught] = useState(() => {
+    try { return !!localStorage.getItem(TAUGHT_KEY); } catch { return true; }
+  });
+  // Lanes the user has chosen to see in full. Session-only on purpose: the
+  // point is a tidy default every visit, not a remembered preference.
+  const [expanded, setExpanded] = useState(() => new Set());
   // Selection resets when the filter or search changes. This useEffect MUST
   // live above the early-return gates below — otherwise the hook order
   // changes across renders and React blanks the page (Rules of Hooks).
@@ -143,6 +199,10 @@ export default function EmailTab() {
     });
   };
 
+  // Intentionally unreferenced while the digest control is a dead label (see
+  // the toolbar). Kept wired so restoring the switch is a one-line change the
+  // day Mail.Send + the Container Apps Job land.
+  // eslint-disable-next-line no-unused-vars
   const toggleDigest = async () => {
     if (!data) return;
     const want = !data.digestEnabled;
@@ -175,7 +235,7 @@ export default function EmailTab() {
     return <div className="py-16 text-center font-mono text-sm tracking-widest uppercase" style={{ color: SEA }}>Loading…</div>;
   }
 
-  const lanes = data?.lanes || { needsReply: [], fyi: [], cleanup: [], dismissed: [] };
+  const lanes = data?.lanes || { needsReply: [], fyi: [], cleanup: [], dismissed: [], handled: [] };
   const needCount = lanes.needsReply.length;
 
   const dismiss = async (id) => {
@@ -260,6 +320,52 @@ export default function EmailTab() {
     catch { runSync(false); }
   };
 
+  // The correction. Optimistically relocate the row, then record it — the
+  // server keeps a snapshot of the signals behind the wrong verdict, which
+  // is what makes the correction reusable instead of a one-off nudge.
+  const moveThread = async (id, state, why) => {
+    const laneKey = Object.keys(STATE_OF_LANE).find((k) => STATE_OF_LANE[k] === state);
+    setData((d) => {
+      if (!d) return d;
+      const next = { ...d, lanes: { ...d.lanes } };
+      let moved = null;
+      for (const k of ["needsReply", "fyi", "cleanup", "handled", "dismissed"]) {
+        const before = next.lanes[k] || [];
+        next.lanes[k] = before.filter((t) => {
+          if (t.id === id) {
+            moved = { ...t, state, dismissed: false, reason: "you moved this here", modelUsed: false };
+            return false;
+          }
+          return true;
+        });
+      }
+      if (moved && laneKey) next.lanes[laneKey] = [moved, ...(next.lanes[laneKey] || [])];
+      return next;
+    });
+    if (!taught) {
+      setTaught(true);
+      try { localStorage.setItem(TAUGHT_KEY, "1"); } catch { /* ignore */ }
+    }
+    try {
+      const res = await api.reclassifyEmailThread(id, state, why);
+      if (res?.suggestions?.length) setSuggested(res.suggestions);
+    } catch {
+      runSync(false); // recover from server truth
+    }
+  };
+
+  const acceptSuggestion = async (sid) => {
+    setSuggested((s) => s.filter((x) => x.id !== sid));
+    try {
+      await api.acceptTriageSuggestion(sid);
+      setData(await api.emailOverview());
+    } catch { /* the Rules tab is the recovery path */ }
+  };
+  const rejectSuggestion = async (sid) => {
+    setSuggested((s) => s.filter((x) => x.id !== sid));
+    try { await api.rejectTriageSuggestion(sid); } catch { /* non-critical */ }
+  };
+
   // Filter chips: match the CRM/Accounts segmented-control pattern. `all`
   // keeps the multi-lane view; anything else collapses to a flat rank-sorted
   // list for that one bucket. Counts on each chip mirror lane row counts so
@@ -269,6 +375,7 @@ export default function EmailTab() {
     { key: "needsReply", label: "Reply needed", n: lanes.needsReply?.length || 0 },
     { key: "fyi", label: "Worth knowing", n: lanes.fyi?.length || 0 },
     { key: "cleanup", label: "Cleanup", n: lanes.cleanup?.length || 0 },
+    { key: "handled", label: "Handled", n: lanes.handled?.length || 0 },
     { key: "dismissed", label: "Dismissed", n: lanes.dismissed?.length || 0 },
   ];
 
@@ -288,6 +395,18 @@ export default function EmailTab() {
     return b.rank - a.rank || (b.lastAt || "").localeCompare(a.lastAt || "");
   };
   const laneRows = (key) => [...(lanes[key] || []).filter(matches)].sort(cmp);
+
+  // Capping is skipped while searching: a search IS the user narrowing things
+  // down, so hiding results behind a "show all" would fight what they asked
+  // for. Because the cap runs AFTER `cmp`, "top 25" means top 25 by the
+  // active sort — most important on the default, newest if they switched.
+  const capOf = (key, rows) =>
+    (q || expanded.has(key) || rows.length <= LANE_CAP) ? rows : rows.slice(0, LANE_CAP);
+  const toggleExpanded = (key) => setExpanded((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
   const flatRows = filter === "all" ? null : laneRows(filter);
   const visibleLanes = filter === "all"
     ? LANES.map((lane) => ({ ...lane, rows: laneRows(lane.key) }))
@@ -321,17 +440,17 @@ export default function EmailTab() {
         )}
         {error && <span className="text-xs" style={{ color: TIDE }}>{error}</span>}
 
-        {/* Digest opt-in — stored now, honoured when the digest ships. */}
-        <label className="flex items-center gap-2 ml-auto cursor-pointer select-none">
-          <span className="text-xs" style={{ color: "#4a5a60" }}>Daily digest email</span>
-          <button role="switch" aria-checked={!!data?.digestEnabled} onClick={toggleDigest}
-            className="relative w-9 h-5 rounded-full transition-colors"
-            style={{ background: data?.digestEnabled ? "#2F5D50" : "#cdd6d4" }}>
-            <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
-              style={{ left: data?.digestEnabled ? "18px" : "2px" }} />
-          </button>
-          <span className="font-mono text-[10px] uppercase" style={{ color: "#b0b8ba" }}>coming soon</span>
-        </label>
+        {/* Digest: a DEAD LABEL, not a control, until Mail.Send is granted and
+            the Container Apps Job exists. A switch that stores a preference
+            and then sends nothing for a week is a trust cost on the feature we
+            most need people to trust — so there is nothing to flip yet.
+            Restore the switch (toggleDigest + user_prefs.digest_enabled are
+            both still wired) the day sending goes live. */}
+        <span className="flex items-center gap-2 ml-auto text-xs" style={{ color: "#b0b8ba" }}>
+          Daily digest email
+          <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded"
+            style={{ background: MIST, color: "#8b9a9f" }}>coming soon</span>
+        </span>
       </div>
 
       {/* Filter chips + sort control */}
@@ -348,7 +467,17 @@ export default function EmailTab() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1">
+        {/* Rules sits apart from the lane chips on purpose: it is not another
+            slice of the inbox, it is where the user tells the triage how their
+            own mail works. */}
+        <button onClick={() => setFilter(filter === "rules" ? "all" : "rules")}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded border whitespace-nowrap"
+          style={filter === "rules"
+            ? { background: INK, color: "white", borderColor: INK }
+            : { background: "white", color: INK, borderColor: BORDER }}>
+          <SlidersHorizontal size={13} /> Triage rules
+        </button>
+        <div className="flex items-center gap-1" hidden={filter === "rules"}>
           <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: "#8b9a9f" }}>Sort</span>
           <div className="flex gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid " + BORDER }}>
             {[
@@ -367,7 +496,8 @@ export default function EmailTab() {
       </div>
 
       {/* Counts line — split "handled" into its two real meanings. */}
-      <div className="text-xs mb-4 flex items-center gap-3 flex-wrap" style={{ color: "#8b9a9f" }}>
+      <div className="text-xs mb-4 flex items-center gap-3 flex-wrap" style={{ color: "#8b9a9f" }}
+        hidden={filter === "rules"}>
         <span>
           {filteredNeed === 0 ? "Nothing needs your reply" : `${filteredNeed} thread${filteredNeed === 1 ? "" : "s"} need${filteredNeed === 1 ? "s" : ""} your reply`}
           {" · "}{filteredFyi} worth knowing
@@ -413,8 +543,65 @@ export default function EmailTab() {
         </div>
       )}
 
-      {/* Content: multi-lane view for "All", flat rank-ordered list otherwise */}
-      {filter === "all" ? (
+      {/* Shown once, until the user's first correction. */}
+      {!taught && filter !== "rules" && !firstScan && (
+        <div className="rounded-lg border p-3 mb-3 flex items-start gap-2 text-sm"
+          style={{ borderColor: BORDER, background: "white", color: "#4a5a60" }}>
+          <CornerUpRight size={15} className="mt-0.5 shrink-0" style={{ color: SEA }} />
+          <div className="flex-1">
+            <span className="font-medium" style={{ color: INK }}>Something in the wrong lane?</span>{" "}
+            Hit <span className="font-mono text-xs" style={{ color: SEA }}>Move</span> on the row and
+            pick where it belongs. It learns from that — after a few corrections it offers you a
+            rule to make it permanent.
+          </div>
+          <button onClick={() => {
+            setTaught(true);
+            try { localStorage.setItem(TAUGHT_KEY, "1"); } catch { /* ignore */ }
+          }} className="p-1 rounded hover:bg-stone-100 shrink-0" style={{ color: "#8b9a9f" }}
+            title="Got it">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* A correction that just unlocked a rule. Shown inline, at the top of
+          the list, because the user still has the thread in mind right now —
+          the same card found later in a settings panel has lost its context. */}
+      {suggested.length > 0 && filter !== "rules" && (
+        <div className="rounded-lg border p-3 mb-3" style={{ borderColor: SEA, background: "rgba(146,37,37,.05)" }}>
+          <div className="flex items-center gap-1.5 mb-2">
+            <Lightbulb size={14} style={{ color: SEA }} />
+            <span className="font-mono text-[10px] font-bold uppercase tracking-widest" style={{ color: SEA }}>
+              Want a rule for that?
+            </span>
+          </div>
+          {suggested.map((s) => (
+            <div key={s.id} className="mb-2 last:mb-0">
+              <div className="text-sm font-medium" style={{ color: INK }}>{s.describe}</div>
+              <div className="text-xs mb-1.5" style={{ color: "#8b9a9f" }}>{s.rationale}</div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => acceptSuggestion(s.id)}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded text-white text-xs font-medium"
+                  style={{ background: INK }}>
+                  <Check size={12} /> Add rule
+                </button>
+                <button onClick={() => rejectSuggestion(s.id)}
+                  className="px-3 py-1 rounded text-xs font-medium border bg-white"
+                  style={{ borderColor: BORDER, color: "#4a5a60" }}>
+                  Not quite
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Content: rules panel, multi-lane view for "All", or a flat list */}
+      {filter === "rules" ? (
+        <EmailRules onChanged={async () => {
+          try { setData(await api.emailOverview()); } catch { /* keep current view */ }
+        }} />
+      ) : filter === "all" ? (
         <div className="space-y-3">
           {visibleLanes.map((lane) => {
             const isCollapsed = collapsed.has(lane.key);
@@ -439,21 +626,27 @@ export default function EmailTab() {
                         {q ? "No matches in this lane." : lane.empty}
                       </div>
                     ) : (
-                      <ul>
-                        {lane.rows.map((t) => {
-                          const canBulk = lane.key === "needsReply" || lane.key === "fyi";
-                          return (
-                            <ThreadRow
-                              key={t.id}
-                              t={t}
-                              onDismiss={lane.key !== "dismissed" && lane.key !== "cleanup" ? () => dismiss(t.id) : null}
-                              onUndismiss={lane.key === "dismissed" ? () => undismiss(t.id) : null}
-                              checked={selected.has(t.id)}
-                              onToggleCheck={canBulk ? () => toggleSelected(t.id) : null}
-                            />
-                          );
-                        })}
-                      </ul>
+                      <>
+                        <ul>
+                          {capOf(lane.key, lane.rows).map((t) => {
+                            const canBulk = lane.key === "needsReply" || lane.key === "fyi";
+                            return (
+                              <ThreadRow
+                                key={t.id}
+                                t={t}
+                                onDismiss={lane.key !== "dismissed" && lane.key !== "cleanup" ? () => dismiss(t.id) : null}
+                                onUndismiss={lane.key === "dismissed" ? () => undismiss(t.id) : null}
+                                checked={selected.has(t.id)}
+                                onToggleCheck={canBulk ? () => toggleSelected(t.id) : null}
+                                onMove={(state, why) => moveThread(t.id, state, why)}
+                              />
+                            );
+                          })}
+                        </ul>
+                        <LaneMore laneKey={lane.key} rows={lane.rows}
+                          expanded={expanded.has(lane.key)} searching={!!q}
+                          onToggle={() => toggleExpanded(lane.key)} />
+                      </>
                     )}
                   </>
                 )}
@@ -478,21 +671,27 @@ export default function EmailTab() {
                   {q ? `No ${active?.label?.toLowerCase() || ""} threads match "${query}".` : active?.empty}
                 </div>
               ) : (
-                <ul>
-                  {flatRows.map((t) => {
-                    const canBulk = filter === "needsReply" || filter === "fyi";
-                    return (
-                      <ThreadRow
-                        key={t.id}
-                        t={t}
-                        onDismiss={filter !== "dismissed" && filter !== "cleanup" ? () => dismiss(t.id) : null}
-                        onUndismiss={filter === "dismissed" ? () => undismiss(t.id) : null}
-                        checked={selected.has(t.id)}
-                        onToggleCheck={canBulk ? () => toggleSelected(t.id) : null}
-                      />
-                    );
-                  })}
-                </ul>
+                <>
+                  <ul>
+                    {capOf(filter, flatRows).map((t) => {
+                      const canBulk = filter === "needsReply" || filter === "fyi";
+                      return (
+                        <ThreadRow
+                          key={t.id}
+                          t={t}
+                          onDismiss={filter !== "dismissed" && filter !== "cleanup" ? () => dismiss(t.id) : null}
+                          onUndismiss={filter === "dismissed" ? () => undismiss(t.id) : null}
+                          checked={selected.has(t.id)}
+                          onToggleCheck={canBulk ? () => toggleSelected(t.id) : null}
+                          onMove={(state, why) => moveThread(t.id, state, why)}
+                        />
+                      );
+                    })}
+                  </ul>
+                  <LaneMore laneKey={filter} rows={flatRows}
+                    expanded={expanded.has(filter)} searching={!!q}
+                    onToggle={() => toggleExpanded(filter)} />
+                </>
               )}
             </section>
           );
@@ -502,13 +701,35 @@ export default function EmailTab() {
   );
 }
 
-function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck }) {
+// The footer under a capped lane. Names the sort in the label so "top 25"
+// never looks arbitrary — the user should know WHICH 25 they are looking at.
+function LaneMore({ rows, expanded, searching, onToggle }) {
+  if (searching || rows.length <= LANE_CAP) return null;
+  return (
+    <button onClick={onToggle}
+      className="w-full px-3 py-2 text-xs font-medium text-left hover:bg-stone-50"
+      style={{ borderTop: "1px solid " + ROW_LINE, color: SEA }}>
+      {expanded
+        ? `Show fewer — back to the top ${LANE_CAP}`
+        : `Show all ${rows.length} — ${rows.length - LANE_CAP} more below the top ${LANE_CAP}`}
+    </button>
+  );
+}
+
+function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove }) {
   const cat = CATEGORY[t.category] || CATEGORY.other;
+  const [menu, setMenu] = useState(false);
+  const [why, setWhy] = useState("");
   // Empty webLink used to render as href="#" which reloaded the SPA and
   // looked like "the CRM tab". Fall back to a plain div in that case so
   // there is no phantom click target.
   const hasLink = !!t.webLink;
   const Row = hasLink ? "a" : "div";
+  // `_blank` — a NEW tab per row, deliberately. A named target was tried
+  // 2026-09-02 and REVERTED (Ethan): the OWA deeplink renders that ONE message
+  // with no inbox around it, so reusing a single tab destroys the one you were
+  // reading. Stacking lets you open several, come back to Starbot, and decide
+  // what to do next. Do not "fix" this into a shared tab.
   const rowProps = hasLink
     ? { href: t.webLink, target: "_blank", rel: "noreferrer" }
     : {};
@@ -589,6 +810,17 @@ function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck }) {
             )}
             <span className="font-mono text-[11px] tabular-nums" style={{ color: "#8b9a9f" }}>{ageOf(t.lastAt)}</span>
             {hasLink && <ExternalLink size={12} style={{ color: "#b0b8ba" }} />}
+            {onMove && (
+              // Labelled, not a bare icon. A correction nobody can find
+              // produces no data, and this control IS the feedback loop —
+              // discoverability is the feature here, not decoration.
+              <button onClick={(e) => { stop(e); setMenu((v) => !v); }}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase hover:bg-stone-200"
+                title="Wrong lane? Move it — the triage learns from this"
+                style={{ color: menu ? SEA : "#8b9a9f" }}>
+                <CornerUpRight size={11} /> Move
+              </button>
+            )}
             {onDismiss && (
               <button onClick={(e) => { stop(e); onDismiss(); }}
                 className="p-1 rounded hover:bg-stone-200"
@@ -607,6 +839,44 @@ function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck }) {
             )}
           </div>
         </div>
+
+        {/* The correction panel. Lives inside the row so the thread it refers
+            to is still on screen while the user picks. The optional "why" is
+            one tap and it decides whether a resulting rule should generalize
+            to the sender at all — "already handled" is about this thread,
+            "not my area" is about every thread from them. */}
+        {menu && onMove && (
+          <div onClick={stop} className="mt-2 rounded border p-2"
+            style={{ borderColor: BORDER, background: MIST }}>
+            <div className="font-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "#8b9a9f" }}>
+              Where does this belong?
+            </div>
+            <div className="flex flex-wrap gap-1 mb-2">
+              {MOVE_TARGETS.filter((m) => m.state !== t.state).map((m) => (
+                <button key={m.state}
+                  onClick={(e) => { stop(e); setMenu(false); onMove(m.state, why || undefined); setWhy(""); }}
+                  className="px-2.5 py-1 rounded text-xs font-medium bg-white border hover:bg-stone-100"
+                  style={{ borderColor: BORDER, color: INK }}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <div className="font-mono text-[10px] uppercase tracking-widest mb-1" style={{ color: "#b0b8ba" }}>
+              Why? (optional)
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {WHY_CHIPS.map((c) => (
+                <button key={c.k} onClick={(e) => { stop(e); setWhy(why === c.k ? "" : c.k); }}
+                  className="px-2 py-0.5 rounded-full text-[11px] border"
+                  style={why === c.k
+                    ? { background: SEA, color: "white", borderColor: SEA }
+                    : { background: "white", color: "#4a5a60", borderColor: BORDER }}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </Row>
     </li>
   );

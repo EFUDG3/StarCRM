@@ -262,3 +262,45 @@ export const dismissEmailThread = (id) =>
   sessionRequest(`/api/email/threads/${id}/dismiss`, { method: "POST" });
 export const undismissEmailThread = (id) =>
   sessionRequest(`/api/email/threads/${id}/undismiss`, { method: "POST" });
+
+// --- Triage feedback loop (corrections -> per-user rules) --------------------
+//
+// Moving a thread to a different lane is the feedback signal: it is specific,
+// it names the right answer, and it carries the thread's stored signal set
+// with it. `why` is the optional one-tap chip.
+export const reclassifyEmailThread = (id, state, why) =>
+  sessionRequest(`/api/email/threads/${id}/reclassify`, {
+    method: "POST",
+    body: JSON.stringify(why ? { state, why } : { state }),
+  });
+
+export const getTriageRules = () => sessionRequest("/api/email/rules");
+
+export const createTriageRule = (data) =>
+  sessionRequest("/api/email/rules", { method: "POST", body: JSON.stringify(data) });
+
+export const updateTriageRule = (id, data) =>
+  sessionRequest(`/api/email/rules/${id}`, { method: "PUT", body: JSON.stringify(data) });
+
+export const deleteTriageRule = (id) =>
+  sessionRequest(`/api/email/rules/${id}`, { method: "DELETE" });
+
+export const setTriageProfile = (data) =>
+  sessionRequest("/api/email/triage-profile", { method: "PUT", body: JSON.stringify(data) });
+
+export const acceptTriageSuggestion = (id) =>
+  sessionRequest(`/api/email/suggestions/${id}/accept`, { method: "POST" });
+
+export const rejectTriageSuggestion = (id) =>
+  sessionRequest(`/api/email/suggestions/${id}/reject`, { method: "POST" });
+
+// `model=false` is the free deterministic replay (no Graph, no tokens) — that
+// is what makes a rule edit visibly re-sort the tab immediately.
+export const retriageEmail = (model = false) =>
+  sessionRequest(`/api/email/retriage?model=${model ? "true" : "false"}`, { method: "POST" });
+
+// Full re-read of the backfill window: drops the Graph delta tokens and
+// re-fetches. Needed when a fix changes how a message is PARSED (snippets are
+// built at sync time, so retriage can't reach them). ~80s, a cent or two.
+export const resyncEmail = () =>
+  sessionRequest("/api/email/resync", { method: "POST" });

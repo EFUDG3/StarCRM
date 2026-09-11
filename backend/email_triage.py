@@ -36,9 +36,11 @@ from sqlalchemy.orm import Session
 import graph
 import m365
 import telemetry
+import triage_engine
 from database import get_db
-from models import Account, EmailSyncState, EmailThread, GlossaryEntry, User, UserPref
-from schemas import EmailPrefIn
+from models import (Account, EmailSyncState, EmailThread, GlossaryEntry,
+                    TriageFeedback, TriageRule, TriageSuggestion, User, UserPref)
+from schemas import EmailPrefIn, TriageProfileIn, TriageRuleIn, ThreadReclassifyIn
 
 log = logging.getLogger("uvicorn.error")
 
@@ -111,11 +113,13 @@ _ACK = re.compile(
 
 
 def _fresh(text: str) -> str:
-    """The unquoted part of a bodyPreview: everything before the reply-header
-    junk ('________', 'From: ...', 'On ... wrote:'). Signals like 'asks a
-    question' must read THIS, not the quoted history underneath it."""
-    head = re.split(r"_{5,}|From:\s|On .{5,60} wrote:", text or "", maxsplit=1)[0]
-    return head.strip()
+    """Snippet extraction — ONE implementation, in triage_engine.
+
+    It was duplicated here, which is how the two copies would have drifted
+    the moment either was tuned. The signature-stripping and bare-forward
+    fallback logic belongs with the signals that read it.
+    """
+    return triage_engine.fresh(text)
 
 
 def _addr(entry: dict) -> str:
@@ -191,6 +195,9 @@ def _compact(m: dict, me: str, folders: dict[str, str], direction: str) -> dict:
 def sync_user(db: Session, user: User, token: str) -> dict:
     """One full sync + triage round for a user. Incremental after first run."""
     me = (user.email or "").lower()
+    # Settle which company rules this user gets BEFORE any triage runs, so an
+    # existing mailbox never gets silently re-sorted by a changed default.
+    ensure_rule_set(db, user)
     state = db.get(EmailSyncState, user.id)
     if state is None:
         state = EmailSyncState(user_id=user.id)
@@ -248,13 +255,18 @@ def sync_user(db: Session, user: User, token: str) -> dict:
     # sorted list of ISO timestamps of outbound messages to them (across
     # ALL of this user's threads). Read once per sync.
     outbound_map = _build_outbound_map(db, user)
+    # This user's rules, read once per sync. Hard rules are evaluated inside
+    # the engine; the guidance text rides into the model prompt.
+    hard_rules, active_ids, guidance = _user_rules(db, user)
     ambiguous: list[EmailThread] = []
     for t in touched.values():
-        _triage_deterministic(t, user, domains, outbound_map=outbound_map)
+        _triage_thread(t, user, domains, outbound_map=outbound_map,
+                       user_rules=hard_rules, active_rule_ids=active_ids)
         if t.state == "model":
             ambiguous.append(t)
     if ambiguous:
-        _triage_model(db, user, ambiguous)
+        _triage_model(db, user, ambiguous, guidance=guidance)
+    _bump_rule_hits(db, user, list(touched.values()))
 
     # Retention: prune what the tab will never show again.
     cutoff = (_now() - timedelta(days=RETENTION_DAYS)).isoformat()
@@ -351,190 +363,166 @@ def _build_outbound_map(db: Session, user: User) -> dict[str, list[str]]:
     return out
 
 
-def _replied_in_another_thread(sender: str, since: str,
-                               outbound_map: dict[str, list[str]]) -> bool:
-    """True if user sent something to `sender` after `since`, per the
-    precomputed map. Simple linear scan — recipient lists are short
-    (typically <20 sends per address over 90 days)."""
-    if not sender:
-        return False
-    for at in outbound_map.get(sender.lower(), []):
-        if at > since:
-            return True
-    return False
+def ensure_rule_set(db: Session, user: User) -> str:
+    """Decide, ONCE per user, which company rules they start with.
+
+    The rule that matters here: **a mailbox that already has triaged mail keeps
+    the rules that produced it; a brand-new mailbox starts clean.**
+
+    Every tier-2 judgment rule was tuned against one IT-admin inbox in Aug
+    2026. Handing those to a salesperson as defaults gives them someone else's
+    idea of what matters — demoting cold outreach is right for IT and wrong for
+    sales, whose job it is. But silently re-sorting an inbox that has been
+    running on those rules for three weeks is its own broken promise. Keying on
+    "does this user already have threads" satisfies both without hardcoding
+    anyone's email address.
+
+    Returns "legacy", "fresh", or "existing" for the log line."""
+    pref = db.get(UserPref, user.id)
+    if pref is None:
+        pref = UserPref(user_id=user.id)
+        db.add(pref)
+    if pref.triage_rules_json:
+        return "existing"
+
+    has_history = (
+        db.query(EmailThread.id)
+        .filter(EmailThread.user_id == user.id)
+        .first()
+        is not None
+    )
+    if has_history:
+        pref.triage_rules_json = json.dumps(sorted(triage_engine.LEGACY_TUNED_RULE_IDS))
+        mode = "legacy"
+    else:
+        pref.triage_rules_json = json.dumps(sorted(triage_engine.DEFAULT_ACTIVE_RULE_IDS))
+        mode = "fresh"
+    db.commit()
+    log.info("triage rule set initialized (%s) for %s", mode, user.email)
+    return mode
 
 
-def _triage_deterministic(t: EmailThread, user: User, domains: dict,
-                          outbound_map: dict[str, list[str]] | None = None) -> None:
-    trail = json.loads(t.messages_json or "[]")
-    if not trail:
-        t.state, t.rank, t.reason = "resolved", 0, "thread emptied"
+def _user_rules(db: Session, user: User) -> tuple[list, set[str], str]:
+    """This user's rules, split the way the engine needs them:
+    (hard rules, active company-rule ids, prompt guidance text).
+
+    A NULL `triage_rules_json` means the inbox was never initialized, so only
+    tier-1 mechanical rules apply. That is deliberate: the judgment rules in
+    tier 2 were tuned against one IT-admin mailbox, and inheriting someone
+    else's idea of what matters is exactly the failure this redesign fixes."""
+    rules = (
+        db.query(TriageRule)
+        .filter(TriageRule.user_id == user.id, TriageRule.active == True)  # noqa: E712
+        .order_by(TriageRule.created_at)
+        .all()
+    )
+    hard = [r for r in rules if r.kind == "hard"]
+    soft = [r for r in rules if r.kind == "soft"]
+
+    pref = db.get(UserPref, user.id)
+    if pref is not None and pref.triage_rules_json:
+        try:
+            active = set(json.loads(pref.triage_rules_json))
+        except Exception:
+            active = set(triage_engine.DEFAULT_ACTIVE_RULE_IDS)
+    else:
+        active = set(triage_engine.DEFAULT_ACTIVE_RULE_IDS)
+
+    guidance_bits: list[str] = []
+    if pref is not None and (pref.triage_profile or "").strip():
+        guidance_bits.append(f"About this user's job: {pref.triage_profile.strip()}")
+    for r in soft:
+        line = (r.text or "").strip()
+        if line:
+            guidance_bits.append(f"- {line}")
+    return hard, active, "\n".join(guidance_bits)
+
+
+def _bump_rule_hits(db: Session, user: User, threads: list[EmailThread]) -> None:
+    """Count how often each user rule actually fired.
+
+    Not decoration: hit counts separate rules doing real work from one-off
+    annoyances someone typed once, they drive "this rule has never fired,
+    delete it?" prompts, and they answer "what has the bot learned" with a
+    number instead of a claim."""
+    hits: dict[str, int] = {}
+    for t in threads:
+        by = t.decided_by or ""
+        if by.startswith("user:"):
+            hits[by[5:]] = hits.get(by[5:], 0) + 1
+    if not hits:
         return
-    last = trail[-1]
-    me_first = (user.name or "").split()[0].lower()
-    me_email = (user.email or "").lower()
-    my_domain = _domain(me_email)
+    for rule in db.query(TriageRule).filter(
+            TriageRule.user_id == user.id, TriageRule.id.in_(list(hits))).all():
+        rule.hit_count = (rule.hit_count or 0) + hits[rule.id]
+        rule.last_hit_at = _now()
 
-    # Account match on the latest inbound sender's domain.
-    inbound = [r for r in trail if r["dir"] == "in"]
-    sender_dom = _domain(inbound[-1]["from"]) if inbound else ""
-    acct = domains.get(sender_dom)
-    t.account_id, t.account_name = (acct if acct else (None, ""))
-    internal = sender_dom == my_domain and bool(sender_dom)
 
+def _triage_thread(t: EmailThread, user: User, domains: dict,
+                   outbound_map: dict[str, list[str]] | None = None,
+                   user_rules: list | None = None,
+                   active_rule_ids: set[str] | None = None) -> None:
+    """Observe, then decide. Both halves live in triage_engine; this function
+    only moves data between the thread row and the engine.
+
+    Replaces the old `_triage_deterministic` cascade of 12 early returns,
+    where rule ORDER silently decided outcomes and a wrong verdict could not
+    be traced to the rule that produced it."""
+    trail = json.loads(t.messages_json or "[]")
+    signals = triage_engine.collect_signals(
+        trail=trail,
+        subject=t.subject or "",
+        snippet=t.snippet or "",
+        sender_name=t.sender_name or "",
+        sender_email=t.sender_email or "",
+        is_flagged=bool(t.is_flagged),
+        msg_count=int(t.msg_count or 0),
+        last_at=t.last_at or "",
+        user_name=user.name or "",
+        user_email=user.email or "",
+        account_domains=domains,
+        outbound_map=outbound_map,
+    )
+    verdict = triage_engine.decide(
+        signals,
+        sender_email=t.sender_email or "",
+        subject=t.subject or "",
+        user_rules=user_rules,
+        active_rule_ids=active_rule_ids,
+    )
+
+    # The account association is a signal, so it comes back from the engine
+    # rather than being recomputed here.
+    t.account_id = signals.get("account_id")
+    t.account_name = signals.get("account_name") or ""
+
+    # MANUAL HOLD. If the user hand-moved this thread and no new message has
+    # landed since, their verdict stands and the engine's is discarded. The
+    # signals ARE refreshed above/below so a later correction is recorded
+    # against current facts, but the lane is theirs.
+    #
+    # Without this, re-reading the mailbox (a full resync, or any sync that
+    # re-touches the thread) silently reverts every correction a user made —
+    # which is the fastest possible way to destroy trust in the whole loop.
+    if (t.decided_by == "user:manual-move" and t.manual_msg_id
+            and t.manual_msg_id == (t.last_message_id or "")):
+        t.signals_json = json.dumps(
+            {k: v for k, v in signals.items() if v not in (False, "", None)})
+        t.triaged_at = _now()
+        t._model_hint = ""
+        return
+
+    t.state = verdict.state
+    t.rank = verdict.rank
+    t.category = verdict.category
+    t.reason = verdict.reason
+    t.decided_by = verdict.decided_by
+    t.signals_json = json.dumps(
+        {k: v for k, v in signals.items() if v not in (False, "", None)})
     t.model_used = False
     t.triaged_at = _now()
-
-    # Self-to-self (note-to-self from phone, drafts landing in inbox). Never
-    # a task. Blank subject + own address on both ends = drop cleanly.
-    if inbound and inbound[-1]["from"] == me_email and (
-            not t.subject or "sent from my iphone" in (t.snippet or "").lower()):
-        t.state, t.rank, t.category = "resolved", 0, "other"
-        t.reason = "note to yourself"
-        return
-
-    # Recorder-bot nags (Read.ai, Fathom, Otter, Grain). Recurring setup
-    # reminders — never a real reply candidate.
-    if _RECORDER_BOT.search((t.sender_name or "") + " " + (t.sender_email or "")):
-        t.state, t.rank, t.category = "bulk", 5, "notification"
-        t.reason = "meeting-recording bot"
-        return
-
-    # Ticket-system auto-updates (DataNet, Zendesk, etc.) default to FYI —
-    # the model can promote back to needs_reply if the note asks something
-    # specific of THIS user.
-    if inbound and _TICKET_SUBJECT.search(t.subject or ""):
-        t.state = "model"
-        t.category = "notification"
-        t.reason = "ticket update — promote to needs-reply only if a specific question is asked of you"
-        return
-
-    # Bulk? (judged on the thread's inbound face, not the trail)
-    if inbound and not acct:
-        local = t.sender_email.split("@")[0] if t.sender_email else ""
-        if (_BULK_SENDERS.match(local + "@") or _BULK_COPY.search(t.snippet or "")
-                or _BULK_SUBJECT.search(t.subject or "")):
-            t.state, t.rank = "bulk", 5
-            t.category = "notification"
-            t.reason = ("bulk sender" if _BULK_SENDERS.match(local + "@")
-                        else "notification-style subject" if _BULK_SUBJECT.search(t.subject or "")
-                        else "unsubscribe copy")
-            return
-
-    if last["dir"] == "out":
-        t.state, t.rank = "waiting", 20
-        t.category = "customer" if acct else ("internal" if internal else "other")
-        t.reason = "you replied last — waiting on them"
-        return
-
-    # Last message is inbound.
-    if _OOO.search(t.subject or "") or _OOO.search(t.snippet or ""):
-        t.state, t.rank, t.category = "fyi", 10, "notification"
-        t.reason = "auto-reply / out of office"
-        return
-    if _CLOSURE.search(t.subject or "") or _CLOSURE.search(t.snippet or ""):
-        t.state, t.rank = "resolved", 0
-        t.category = "customer" if acct else "other"
-        t.reason = "closure language — thread looks settled"
-        return
-    # "Got it, thanks!" as the last word = a social close, not a task. Only
-    # fires when the fresh text is a short acknowledgment with no question —
-    # and only when you'd already replied (msg_count > 1), so a bare "thanks"
-    # opener can't hide a real ask.
-    if t.msg_count > 1 and _ACK.match(t.snippet or "") and "?" not in (t.snippet or ""):
-        t.state, t.rank = "resolved", 0
-        t.category = "customer" if acct else ("internal" if internal else "other")
-        t.reason = "they acknowledged — nothing left to answer"
-        return
-
-    named = bool(me_first) and bool(
-        re.search(rf"\b{re.escape(me_first)}\b", (t.snippet or "").lower()))
-
-    # Colleague spoke last (internal, not me): settled only if I was Cc-level.
-    if internal and last["from"] != (user.email or "").lower():
-        if last.get("toMe") or named:
-            t.state = "model"   # demote-not-drop: ask "does their reply cover me?"
-            t.reason = "colleague replied — verify it covers what was asked of you"
-            return
-        t.state, t.rank, t.category = "fyi", 15, "internal"
-        t.reason = "a colleague replied — you were copied"
-        return
-
-    # Score the needs-reply candidates.
-    score = 55
-    reasons = []
-    if last.get("toMe"):
-        score += 10; reasons.append("addressed to you")
-    if t.is_flagged:
-        score += 15; reasons.append("you flagged it")
-    if acct:
-        score += 15; reasons.append(f"hit-list account: {t.account_name}")
-    if internal:
-        score += 5; reasons.append("internal")
-    days = _days_since(t.last_at)
-    if days >= 2:
-        score += min(days * 2, 14); reasons.append(f"waiting {days}d")
-    if "?" in (t.snippet or ""):
-        reasons.append("asks a question")
-
-    t.category = "customer" if acct else ("internal" if internal else "other")
-    asks = "?" in (t.snippet or "")
-    # Automated senders defeat the human signals: marketing mail puts your name
-    # in every greeting and support acks end in "did we help?". If the sender
-    # reads as a robot and isn't a known account or a colleague, Haiku judges it.
-    robot = bool(re.search(r"(support|customer service|customer care|helpdesk|team$|"
-                           r"notifications?|accounts?@|hello@|hi@|contact@|sales@|info@|"
-                           r"hey@|growth@|assistant)",
-                           (t.sender_name or "") + " " + (t.sender_email or ""), re.I))
-    # Cold first contact from an unknown external domain is where marketing
-    # lives ("Abacus AI", "Verisk"): no history with us, not on the hit list,
-    # not a colleague. A real human first-contact survives the model pass with
-    # a proper reason; a pitch gets classified as the pitch it is.
-    cold = t.msg_count == 1 and not acct and not internal and not t.is_flagged
-    # "Addressed to you" alone is how verification codes and vendor promos top
-    # the lane — toMe needs a second human signal, otherwise Haiku judges it.
-    # They replied to you last with a statement, not a question: often that IS
-    # the end of the thread (they answered what you asked). The model judges.
-    answered = t.msg_count > 1 and not asks and any(
-        r["dir"] == "out" for r in trail[:-1])
-    strong = ((t.is_flagged or named or bool(acct) or internal
-               or (last.get("toMe") and asks))
-              and not (robot and not acct and not internal)
-              and not cold and not answered)
-    if strong:
-        # Cross-thread reply check: user may have already answered by starting
-        # a new thread. Cheap DB scan of their own outbound history, no model,
-        # no Graph. Demotes to fyi (soft — still visible, just not treated as
-        # a task); the model can still promote back if a specific ask remains.
-        if outbound_map and t.sender_email and _replied_in_another_thread(
-                t.sender_email, t.last_at or "", outbound_map):
-            t.state = "fyi"
-            t.rank = min(score, 35)
-            t.category = "customer" if acct else ("internal" if internal else "other")
-            t.reason = "you may have replied in another thread — verify"
-            return
-        t.state, t.rank = "needs_reply", min(score, 100)
-        t.reason = ", ".join(reasons) or "direct message to you"
-    elif cold:
-        # Cold outreach still MATTERS — sales pitches and first contacts bring
-        # business — but they belong in "worth knowing", not the reply lane.
-        # The model still gets to look; it just won't default to needs_reply.
-        t.state = "model"
-        t.rank = min(score, 40)
-        t.reason = "cold outreach — worth knowing, promote only if it asks something specific"
-    else:
-        t.state = "model"   # unclear ask -> let Haiku judge
-        t.rank = min(score, 100)
-        t.reason = ("they replied to your message — check if anything is still asked of you"
-                    if answered else "unclear whether this needs you")
-
-
-def _days_since(iso: str) -> int:
-    try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).replace(tzinfo=None)
-        return max(0, (_now() - dt).days)
-    except Exception:
-        return 0
+    # Stashed for the model stage; not a column, just in-request state.
+    t._model_hint = verdict.model_hint
 
 
 # --- Stage 5: Haiku on the ambiguous remainder --------------------------------
@@ -546,7 +534,8 @@ def _glossary_block(db: Session) -> str:
     return f"\nCompany context (Star Flooring & Remodeling, San Diego):\n{lines}\n"
 
 
-def _triage_model(db: Session, user: User, threads: list[EmailThread]) -> None:
+def _triage_model(db: Session, user: User, threads: list[EmailThread],
+                  guidance: str = "") -> None:
     """Batch-classify the threads rules couldn't settle. Metadata only — no
     bodies. On any failure the deterministic verdict stands (fail open into
     the visible lane, never silently drop mail)."""
@@ -556,9 +545,17 @@ def _triage_model(db: Session, user: User, threads: list[EmailThread]) -> None:
         items = "\n".join(
             f'{n}. from: {t.sender_name or "?"} <{t.sender_email or "?"}> | '
             f'subject: {(t.subject or "(no subject)")[:100]} | '
-            f'hint: {t.reason or ""} | snippet: {(t.snippet or "")[:200]}'
+            f'hint: {getattr(t, "_model_hint", "") or t.reason or ""} | '
+            f'snippet: {(t.snippet or "")[:200]}'
             for n, t in enumerate(batch, 1)
         )
+        # Per-user guidance goes AFTER the company instructions so that a
+        # user's own standing instruction wins a disagreement — same
+        # precedence as hard rules beating company rules in the engine.
+        user_block = (
+            "\nThis user's own standing instructions — these OVERRIDE the "
+            f"general guidance above when they conflict:\n{guidance}\n"
+            if guidance.strip() else "")
         prompt = (
             f"You are triaging {user.name}'s work inbox at a flooring company.{gloss}\n"
             "For each thread pick ONE state:\n"
@@ -575,11 +572,10 @@ def _triage_model(db: Session, user: User, threads: list[EmailThread]) -> None:
             "RULE: when in doubt between needs_reply and fyi, choose fyi. The "
             "cost of a false needs_reply (noise in the reply lane) is much "
             "higher than a false fyi (still visible, just lower).\n"
-            "For 'ticket update' hints: default to fyi unless the note contains "
-            "a specific question directed at the user. For 'colleague replied' "
-            "hints: fyi unless the colleague clearly did NOT cover the user's "
-            "part. For 'cold outreach' hints: fyi unless the pitch asks a "
-            "specific decision or scheduling of the user.\n"
+            "Each row carries a `hint` from the rules engine saying why it "
+            "reached you. Treat the hint as the specific question to answer "
+            "about that row, not as a verdict already reached.\n"
+            f"{user_block}"
             "Also return:\n"
             "- importance: 1-5 (5 = urgent business).\n"
             '- category: "customer", "vendor", "internal", "notification", or "other".\n'
@@ -606,6 +602,7 @@ def _triage_model(db: Session, user: User, threads: list[EmailThread]) -> None:
                     t.state = "fyi"
                     t.rank = min(t.rank, 30)
                     t.reason = (t.reason + " (model unavailable)").strip()
+                    t.decided_by = "model:unavailable"
             continue
         for n, t in enumerate(batch, 1):
             v = verdicts.get(n)
@@ -613,6 +610,7 @@ def _triage_model(db: Session, user: User, threads: list[EmailThread]) -> None:
                 # No verdict for this row = default to fyi, same reasoning.
                 t.state = "fyi"
                 t.rank = min(t.rank, 30)
+                t.decided_by = "model:no-verdict"
                 continue
             st = str(v.get("state", "")).strip().lower()
             t.state = st if st in ("needs_reply", "fyi", "resolved") else "fyi"
@@ -626,6 +624,10 @@ def _triage_model(db: Session, user: User, threads: list[EmailThread]) -> None:
             if reason:
                 t.reason = reason
             t.model_used = True
+            # Keep the rule that DEFERRED to the model in the audit trail —
+            # "model" alone would lose which rule sent it here, and that is
+            # usually the thing a correction needs to fix.
+            t.decided_by = f"model(via {t.decided_by})" if t.decided_by else "model"
 
 
 # --- Router -------------------------------------------------------------------
@@ -650,6 +652,9 @@ def _serialize(t: EmailThread) -> dict:
         "category": t.category or "other",
         "reason": t.reason or "",
         "modelUsed": t.model_used,
+        # The rule that produced this verdict, surfaced so a user can see
+        # WHICH rule to correct rather than just that something was wrong.
+        "decidedBy": t.decided_by or "",
         "accountId": t.account_id,
         "accountName": t.account_name or "",
         "flagged": t.is_flagged,
@@ -670,7 +675,13 @@ def _overview(db: Session, user: User) -> dict:
     # task worth eye time. The classification still lives in the DB (useful
     # data), but never appears in the tab. Dismissed threads land in their
     # own bucket so the user can un-hide from a mistake.
-    lanes = {"needsReply": [], "fyi": [], "cleanup": [], "dismissed": []}
+    # "handled" is new (2026-09-02) and exists to close a recovery gap: a
+    # thread wrongly marked resolved used to be invisible AND uncorrectable,
+    # so the engine's worst failure class — a real ask silently hidden —
+    # generated no feedback at all. Collapsed by default in the UI; its
+    # absence from the lanes above is still the feature.
+    lanes = {"needsReply": [], "fyi": [], "cleanup": [], "dismissed": [],
+             "handled": []}
     # Split the "not shown" counter into its two real meanings so the
     # footnote can say WHICH kind of "handled" each number is.
     resolved = 0  # closed themselves — ack, closure language, ooo, self-notes
@@ -687,10 +698,12 @@ def _overview(db: Session, user: User) -> dict:
             lanes["cleanup"].append(t)
         elif t.state == "resolved":
             resolved += 1
+            lanes["handled"].append(t)
         elif t.state == "waiting":
             waiting += 1
+            lanes["handled"].append(t)
     lanes["needsReply"].sort(key=lambda t: (-t.rank, t.last_at))
-    for k in ("fyi", "cleanup", "dismissed"):
+    for k in ("fyi", "cleanup", "dismissed", "handled"):
         lanes[k].sort(key=lambda t: t.last_at or "", reverse=True)
 
     state = db.get(EmailSyncState, user.id)
@@ -729,6 +742,47 @@ def run_sync(
                             detail=str(err))
     out = _overview(db, user)
     out["syncStats"] = stats
+    return out
+
+
+@router.post("/resync")
+def run_full_resync(
+    user: User = Depends(m365.get_session_user), db: Session = Depends(get_db)
+) -> dict:
+    """Throw away the delta tokens and re-read the whole backfill window.
+
+    WHY THIS EXISTS AS AN ENDPOINT rather than a hand-run SQL statement: some
+    fixes change how a message is PARSED, not how it is judged — the
+    signature-stripping change to `fresh()` is the first, and there will be
+    more. Stored snippets are built at sync time, so `retriage` (which reads
+    the stored snippet) cannot fix them, and Graph delta will never hand back a
+    message that has not changed. The only route is to re-fetch.
+
+    Doing that per mailbox in psql does not scale past the three pilot users
+    and is not something a non-technical user can be asked to do, so it lives
+    here: one authenticated call, no database access.
+
+    Cost: a full backfill (~80s and 1-2 cents of Haiku on a 30-day mailbox),
+    versus ~19s for a normal incremental Refresh. Not something to run
+    casually. Manual corrections are preserved — see the manual hold in
+    `_triage_thread`.
+    """
+    state = db.get(EmailSyncState, user.id)
+    if state is not None:
+        state.inbox_delta = ""
+        state.sent_delta = ""
+        db.commit()
+    token = m365.get_graph_token(user, db)
+    try:
+        stats = sync_user(db, user, token)
+    except graph.GraphError as err:
+        raise HTTPException(status_code=err.status if err.status == 401 else 502,
+                            detail=str(err))
+    out = _overview(db, user)
+    out["syncStats"] = stats
+    out["fullResync"] = True
+    telemetry.log_event(user.id, "email", "resync",
+                        f"changed={stats.get('changed')} threads={stats.get('threads')}")
     return out
 
 

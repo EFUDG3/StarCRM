@@ -131,7 +131,523 @@ This file is the single source of truth for picking the project back up. Read it
 > - **Deferred until:** phase-2 digest is live (target 2026-08-25 today). Then meetings is
 >   next in line.
 
-> **Resume note (2026-09-01, LATEST) - Email refinements + phase-2 digest content SHIPPED (rev starbot--emailv2, commit 1d9f945). Digest still not SENDING (Mail.Send).**
+> **DEPLOYED 2026-09-10 (rev `starbot--triagerules`) - the triage engine split, per-user rules and
+> correction feedback loop are LIVE. NOT COMMITTED TO GIT - see the warning below.**
+> - **Build:** `az acr build --registry cadd18599bd0acr --image starbot:triage-rules .` -> Run ID
+>   **`ds1k`**, 1m0s, digest **`sha256:3832944c9816dee802b782e8bf173cc1e43b3dc73926e01a3ce675e0cabaf947`**.
+>   Base images python 3.12-slim + node 20-slim. Claude ran the deploy this time at Ethan's explicit
+>   request ("go ahead and do it for me so i can see it in prod").
+> - **Live revision:** `starbot--triagerules`, 100% traffic, 1 replica, provisioning Succeeded.
+> - **ROLLBACK TARGET: `starbot--mileagev3`** (Active, 0% traffic, created 2026-09-01) on image
+>   **`starbot:mileage-purpose-ui`**. Roll back with
+>   `containerapp update -n starbot -g starbot --image cadd18599bd0acr.azurecr.io/starbot:mileage-purpose-ui`.
+>   (An earlier note in this session guessed `emailv2`/`email-refinements` as the rollback - WRONG;
+>   the mileage purpose-field work shipped after that. Verify the actual previous revision with
+>   `containerapp revision list`, never from memory.)
+> - **Also shipped in this image: Ethan's `connect_timeout` fix** in `database.py` -
+>   `create_engine(..., connect_args={"connect_timeout": 10})`. Without it an unreachable host
+>   (usually a local client IP that dropped out of the Azure Postgres firewall) hangs on the TCP
+>   connect with NO error, which reads as "the app froze" rather than "the DB is unreachable".
+>   Import-checked before the build for exactly this reason - a syntax error in `database.py` would
+>   crash-loop the container rather than fail visibly.
+> - **SCHEMA MIGRATED CLEANLY on boot** (additive `_ensure_schema()`; it runs at module import, so
+>   reaching "Application startup complete" IS the proof it succeeded). Verified directly against
+>   prod: 3 new tables `triage_rules` / `triage_feedback` / `triage_suggestions` (all 0 rows, as
+>   expected) + 5 new columns `email_threads.signals_json|decided_by|manual_msg_id` and
+>   `user_prefs.triage_rules_json|triage_profile`. **21 tables now (was 18). Existing data intact:
+>   accounts 120, email_threads 2,212.**
+> - **Post-deploy verification (all passed):**
+>   - `/api/health` 200 in 0.46s warm.
+>   - **IDENTITY CHECK - the one that actually proves the new build is serving:** four routes that
+>     exist ONLY in this build all return **401, not 404** - `GET /api/email/rules`,
+>     `GET /api/email/corrections/summary`, `POST /api/email/resync`, `POST /api/email/retriage`.
+>     (A 404 would mean the old image was still live; health 200 proves nothing on its own.)
+>   - Clean boot in the container logs: "Application startup complete" + "StreamableHTTP session
+>     manager started" - so the MCP connector is unaffected and no import/DDL error occurred.
+>   - KEDA `business-hours` cron scale rule SURVIVED the image update again (America/Los_Angeles,
+>     start `30 7 * * 1-5`, end `30 15 * * 1-5`, desiredReplicas 1, min 0 / max 10).
+>   - Live JS bundle `/assets/index-B_jJP5Cm.js` (499,769 bytes, matches the local build) greps
+>     clean for "Triage rules", "Suggested rules", "Rebuild from Outlook", "About your job",
+>     "Built-in rules", "Where does this belong", "Something in the wrong lane", "more below the
+>     top", "Not my area", "you moved this here", "Handled" - and does NOT contain "starbotMail",
+>     confirming the named-tab revert shipped (rows open a new tab each, as Ethan wants).
+> - **!! PROD IS RUNNING UNCOMMITTED CODE !!** The working tree holds all of it - `triage_engine.py`,
+>   `triage_feedback.py`, `backend/tests/`, `EmailRules.jsx` are still UNTRACKED, and
+>   email_triage/main/models/schemas/database/Email.jsx/api.js are modified. `acr build` packs the
+>   working directory, not a git ref, so the deploy did not need a commit - but this is the exact
+>   situation that bit revs 41-42 in August. **Ethan should commit + push** (he does his own git):
+>   `git add -A; git commit -m "email: triage engine split (signals + decide), per-user rules, correction feedback loop"`
+> - **REMAINING MANUAL STEP, once per pilot mailbox:** Email tab -> **Triage rules** -> Maintenance ->
+>   **Rebuild from Outlook**. Rebuilds snippets with the signature fix, re-triages with the model
+>   pass (recovering whatever the old ack regex swallowed), preserves hand-moved threads. ~80s and
+>   1-2 cents each. Existing mailboxes auto-seed the legacy tier-2 rule set on their first sync via
+>   `ensure_rule_set()`; brand-new ones get tier 1 only (14 of 23 rules on, not 23/23).
+> - **Worth doing in the same sitting, both free:** fill in "About your job" for Ethan and Salam
+>   (highest-leverage single field - it rides into every model call), and dismiss the Salam
+>   triage-test forwards so the suggester is not trained on synthetic mail.
+
+> **Follow-up (2026-09-02, later) - FIRST REAL MISCLASSIFICATION BATCH triaged: 5 new company-wide rules, `cold` redefined. 31/31 cases pass.**
+> - **Source:** 10 wrong verdicts reported from Ethan's, Salam's and Bob's mailboxes (the only three
+>   that have run the tab). All 10 are now fixture cases in `tests/fixtures/cases.json`, tagged
+>   `REAL:`, using the FIRST-300-CHAR snippet the engine actually sees rather than the full body -
+>   so the test is faithful to what triage gets from Graph.
+> - **THE HEADLINE FINDING: 6 of the 10 came from the tier-1 "mechanical" bulk rules** - the ones
+>   called universally safe that morning. The premise was wrong. **"No human reads a reply to this
+>   address" is NOT the same claim as "there is nothing here for you to do."** A California SB
+>   certification notice with a 09/09/26 discontinuance deadline (`donotreply@fiscal.ca.gov`), a
+>   Paychex 401(k) amendment needing a wet signature on page 14 (`noreply@paychex.com`), and an
+>   SDUSD Group 5C shade-shelter bid invitation (`no-reply@reproconnect.com`, with an unsubscribe
+>   footer) were all filed to Cleanup at rank 5.
+> - **TIER-1 ORDER IS NOW LOAD-BEARING.** Real obligations get first look; automation detection only
+>   claims what is left: `ooo -> action-required -> bid-invitation -> pending-on-us ->
+>   financial-record -> bulk-sender -> bulk-copy -> bulk-subject -> cc-bystander -> closure`.
+> - **5 new tier-1 rules (all company-wide, all on by default):**
+>   1. **`tier1:action-required`** - `DEMANDS_ACTION` (response needed / action required / must
+>      submit-sign-return / on or before <date> / failure to comply / to avoid discontinuance /
+>      signature required / past due / payment declined). **Gated on `to_me or named or flagged`** -
+>      that gate is what stops it over-promoting the RingPlan thread, whose subject literally reads
+>      "Action Required:...Welcome to RingPlan!" but where Salam is only Cc and Olga is running it.
+>   2. **`tier1:bid-invitation`** - `BID_INVITATION` (ad for bids / invitation to bid / notice to
+>      bidders / RFP|RFQ|RFI|ITB / bid date-due-opening-package / prequalification). Deliberately
+>      NOT gated on `to_me`, because plan rooms mail these to shared addresses. **For a contractor
+>      these are inbound revenue - the worst possible thing to file as junk.**
+>   3. **`tier1:pending-on-us`** - `PENDING_ON_US` ("assuming the deposit gets sent", "pending your
+>      signature", "once you", "as soon as we", "waiting on you", "needs your approval"). This is
+>      the Updated Drawing case (David Jenkins, whequip): "I would expect it around 3 weeks from now,
+>      assuming the deposit gets sent soon." No question mark, so `answered-statement` demoted it and
+>      **the model agreed and said fyi**. The deposit was still ours to send. Now deterministic - the
+>      only one of the 10 where the RULES were right and the MODEL was wrong.
+>   4. **`tier1:financial-record`** - receipts/invoices/statements -> **fyi at rank 40, not Cleanup**.
+>      Money records are informational but never junk; an owner wants to see what the company was
+>      charged. Anything past-due or declined is promoted by rule 1 instead, which is checked first.
+>      (The Anthropic $175 receipt was hitting `BULK_SUBJECT`'s "your receipt".)
+>   5. **`tier1:cc-bystander`** - Cc'd, never To, never spoke, on a thread with a real
+>      back-and-forth -> fyi. The owner's common case: Olga runs the vendor install, Salam rides 8
+>      messages on Cc.
+> - **`has_conversation` signal (`we_spoke or msg_count > 2`) now blocks all three bulk rules.**
+>   **Bulk mail does not hold conversations.** This is the cheapest available guard and it is what
+>   kept the 8-message RingPlan/ztelco project thread from being filed as a newsletter because its
+>   subject contained "Welcome to".
+> - **`cold` REDEFINED: was `msg_count == 1`, now `not has_conversation`** (nobody here replied AND
+>   it is not a real thread). The old test missed every salesperson who bumps their own email -
+>   **two unanswered messages from a stranger is MORE cold, not less**, but the bump promoted Justin
+>   Bullerjahn's pitch into Bob's reply lane. Fixed at the signal level, so it is company-wide.
+> - **2 of the 10 were already fixed** by the morning's colleague-first-message bug: Bob's "T&M
+>   TICKET TEMPLATE -> Here you go Boss" and Ethan's "Chase Banking Cards" briefing to Salam. Both
+>   were internal senders opening a thread, both got labelled "colleague replied - verify it covers
+>   what was asked of you", both now land in needs_reply via `score:evidence`.
+> - **A LIMITATION THE BATCH EXPOSED (not fixed, by design):** the Chase Banking Cards mail ends
+>   "Thoughts on this?" - roughly 1,800 characters in. `_SNIPPET_CAP` is 300, so `asks` is FALSE for
+>   it. **A question at the end of a long email is invisible to the engine.** That case still lands
+>   correctly because `internal` is independent positive evidence, but a long external email whose
+>   only ask is in the last line would not. This is the cost of the no-bodies rule and it is worth
+>   keeping; raising the cap raises per-row storage for every thread to fix a minority case.
+> - **Bob's cold-sales case is the clean illustration of why per-user rules exist.** With his legacy
+>   tier-2 set the thread reaches `tier2:cold-outreach -> model -> fyi`. On a FRESH inbox that rule
+>   is off, so the same thread scores `to_me + asks` and lands in needs_reply. Both are in
+>   `cases.json` as a matched pair. Bob's stated preference ("doesn't want to reply to salespeople")
+>   is a per-user rule, not a company default - a sales rep needs the opposite.
+> - **Test state: 31/31 cases + 7 invariants + 12 suggester checks, all passing.** Rule registry is
+>   now 22 (3 structural / 10 tier 1 / 9 tier 2), 29 signals. `tests/test_triage.py` gained
+>   per-case `user` support (salam/bob/ethan - whose mailbox a thread sits in changes the verdict,
+>   since internal-domain and first-name matching key off it) and `"active_rules": "tier1"` to
+>   assert that a verdict DEPENDS on an opt-in tier-2 rule.
+> - **Still not deployed, and one deploy step matters:** fixing the ack regex does NOT retroactively
+>   un-hide the threads the old rule already resolved, and a FREE rules-only re-run will not either
+>   (a thread that recomputes to `model` gets its prior verdict restored rather than being stranded
+>   in a state no lane renders). **After deploying, run `POST /api/email/retriage?model=true` once
+>   per mailbox** (~1-2 cents each) to pull back anything the old ack rule swallowed. A plain
+>   Refresh will not do it.
+
+> - **SECOND PASS, same day - the phrase rules were not general enough. A no-reply address is now
+>   WEAK EVIDENCE and never sufficient for Cleanup on its own.** Ethan's push-back was correct: a
+>   phrase list is still a list, and `DEMANDS_ACTION` would have missed "your certificate of
+>   insurance expires 10/01 - upload a replacement through the vendor portal" (no pattern matches),
+>   sending it to Cleanup exactly like the Paychex notice. Per-item rules do not scale at a company
+>   that runs on email.
+> - **The principle, which this engine already applied elsewhere and I missed here:** the sender
+>   address tells you how the mail was SENT, not what it SAYS. `to_me` alone was ruled insufficient
+>   for the reply lane back in August for the same reason. `bulk_sender` alone is now insufficient
+>   for Cleanup. CONTENT signals stay sufficient on their own, because they are much stronger:
+>   unsubscribe copy is legally required on marketing mail, and "verification code" is a subject
+>   only a machine writes.
+> - **Three outcomes for an automated sender, layered:**
+>   1. no-reply + obligation language -> **needs_reply** (`tier1:action-required`)
+>   2. no-reply + unsubscribe copy OR machine subject -> **bulk / Cleanup** (`tier1:bulk-sender`,
+>      which now REQUIRES `bulk_copy or bulk_subject`)
+>   3. no-reply + nothing else -> **fyi at rank 20** (`tier1:automated-notification`)
+>   Case 3 is the important one: it is the catch-all for obligations worded in ways the phrase list
+>   does not know yet. **Being wrong there costs a row near the bottom of "Worth knowing" instead of
+>   a message nobody ever sees again.** This fixes 4 of the 6 reported bulk misfires on its own,
+>   independent of any phrase matching.
+> - **Deliberate expectation change:** the "no-reply sender" fixture (Concur, "Expense report
+>   submitted / Your report was received") moved from `bulk` to `fyi` via
+>   `tier1:automated-notification`. That is the new intended behavior, not a regression.
+> - **8 generalization cases added, none from a reported email** (CSLB license renewal, workers-comp
+>   premium audit, GC W-9 request, BuildingConnected ITB with an unsubscribe footer, city permit
+>   status, COI expiry) plus **2 PRECISION cases** proving Cleanup still works (a Surfaces Expo
+>   marketing blast and a RollMaster verification code both still land in Cleanup via the
+>   two-signal path). This is what shows the fix is structural rather than scoped to the senders
+>   that were reported. **39/39 cases pass.** Registry is now 23 rules (3 structural / 11 tier 1 /
+>   9 tier 2), 29 signals.
+> - **`DEMANDS_ACTION` also broadened** to cover "please complete/fill out/sign/submit (and return)"
+>   and "complete/return/sign the attached" - the W-9 and audit-worksheet pattern, which is constant
+>   for a contractor and was not matched by the deadline-oriented phrasings.
+> - **EXPECTED SIDE EFFECT, worth measuring after deploy: the Cleanup lane shrinks and "Worth
+>   knowing" grows.** Ethan's mailbox had ~34 in Cleanup; every one whose only bulk evidence was
+>   the From address now moves to fyi rank 20. That is the intended trade (visible-but-low beats
+>   hidden), but it should be checked rather than assumed. `decided_by` makes it a one-line query:
+>   `SELECT decided_by, state, COUNT(*) FROM email_threads WHERE user_id = '<id>' GROUP BY 1,2
+>   ORDER BY 3 DESC;` If `tier1:automated-notification` is enormous, the two-signal threshold is
+>   the knob to revisit - and any single sender that dominates it is a one-click user rule.
+
+> - **THIRD PASS (from Ethan's live UI screenshots) - SNIPPET WAS SHOWING THE SENDER'S SIGNATURE.**
+>   Both forwarded rows in the reply lane displayed "📍 NEW ADDRESS - Effective immediately: Mailing:
+>   4620 Alvarado Canyon Rd., Suite 18..." instead of the email. Cause: `_fresh()` split at the quote
+>   divider and took the HEAD, and on a forward where the sender typed no note the head IS the
+>   signature. **Graph caps `bodyPreview` at 255 characters and Star's signature block is 200+ of
+>   them** (address banner + title + "Celebrating 47 Years"), so the signature consumed the entire
+>   preview. `_SNIPPET_CAP = 300` never bites; Graph's 255 does.
+> - **Why that mattered more than cosmetics:** the snippet is not just display. It feeds `asks`,
+>   `named`, and the model prompt. So the engine was reasoning about a mailing address, and a human
+>   could not judge the row well enough to correct it - which would have corrupted the very
+>   correction data the rollout exists to collect.
+> - **Fix, in `triage_engine.fresh()` (now the SINGLE implementation - `email_triage._fresh`
+>   delegates to it, since two copies would have drifted the moment either was tuned):**
+>   1. **Signatures are stripped** via `_SIGNATURE_START`: the `--` delimiter, the NEW ADDRESS
+>      banner, "Best/Kind/Warm regards", "Very Respectfully" (Bob's), "Celebrating N Years in
+>      Business", "Sent from my <device>", "Get Outlook for <os>".
+>   2. **A bare forward falls back to the forwarded text.** If the new text is under 20 chars after
+>      stripping, read below the divider instead and drop its From/Sent/To/Cc/Subject/Date header
+>      lines. Verified against the real Paychex forward: the snippet went from the address banner to
+>      "You must print, review, and indicate your approval by physically signing page 14."
+> - **"Thanks," and "Regards," are DELIBERATELY NOT signature markers.** Cutting there would
+>   recreate the ack bug that silently hid real work - "Thanks, can you also send the invoice?" is
+>   content. Two new invariant tests pin this: `test_signature_is_stripped_from_the_snippet` and
+>   `test_signature_strip_does_not_eat_a_real_ask`. **39 cases + 9 invariants pass.**
+> - **THIS FIX NEEDS A FULL RE-BACKFILL, not a re-triage.** Snippets are built at sync time in
+>   `_compact`, so `retriage` (which recomputes signals from the STORED snippet) cannot fix existing
+>   rows, and delta sync will never return an unchanged message. To rebuild snippets for a mailbox:
+>   `UPDATE email_sync_state SET inbox_delta = '', sent_delta = '' WHERE user_id = '<id>';` then hit
+>   Refresh - that forces the full 30-day re-fetch (~80s, ~60-70 Haiku verdicts, 1-2 cents).
+>   **CONVENIENTLY THIS ALSO FIXES THE ACK PROBLEM** (everything gets re-triaged with the model
+>   pass), so it replaces the `retriage?model=true` step in the note above. One operation, both
+>   problems.
+> - **Two adoption changes, because a feedback loop nobody notices collects nothing:**
+>   1. The row's move control was a bare 13px icon between the external-link and the X. It now reads
+>      **"⤴ MOVE"**, matching the existing "Restore" button style. Discoverability IS the feature
+>      here - most of the users being rolled out to are sales and field ops, not developers.
+>   2. A one-time hint above the lanes ("Something in the wrong lane? Hit Move on the row...")
+>      that clears on the user's first correction, keyed to `localStorage.starEmailTaughtMove`.
+> - **NEW: `GET /api/email/corrections/summary?days=30` - company-wide rule telemetry.**
+>   AGGREGATE COUNTS ONLY: no senders, no subjects, no message content, no user identities (email is
+>   per-user private by design, so this returns nothing that could reconstruct anyone's mail).
+>   Returns `byRule` ranked by correction count with each rule's label and tier, `transitions`
+>   (`fyi -> needs_reply` etc.), `reasons` (the why-chip histogram), and `distinctMailboxes`.
+>   **This is the number that decides company vs per-user:** a rule with 12 corrections against it
+>   across 4 mailboxes is a bad DEFAULT and belongs in the registry, not in twelve people's personal
+>   rule lists. Credits the rule that ROUTED a thread, unwrapping `model(via <rule>)`.
+> - **Confirmed working live by Ethan (2026-09-02):** forwarded Salam mail correctly promoted to the
+>   reply lane; on Refresh a thread he had replied to moved itself into Handled with no action from
+>   him (`structural:you-spoke-last`). Counts on his mailbox at that moment: All 111 = 9 reply / 71
+>   worth knowing / 31 cleanup, plus 32 handled (17 replied, 15 closed themselves).
+> - **THE VOLUME NUMBER TO WATCH: "Worth knowing" was 71 of 111 visible rows.** That is the
+>   predicted side effect of demoting single-signal automated mail out of Cleanup, and it is a real
+>   usability risk - nobody corrects mail they cannot find. Not addressed yet; the cheap options are
+>   (a) render the top ~25 with a "show all" toggle, (b) sub-group fyi by category
+>   (customer/vendor/internal/notification), or (c) raise the bar for what reaches fyi at all.
+>   Decide with `corrections/summary` data rather than by guessing.
+
+> - **FOURTH PASS - lane cap + digest control removed (Ethan's calls, 2026-09-02).**
+> - **WHY SIGNATURES CANNOT BE SOLVED VIA GRAPH (answered, worth not re-asking):** there is no
+>   signature field in MIME or in Graph - a signature is ordinary body text. **Ethan's Outlook
+>   screenshot is the proof:** Outlook's own preview line shows "📍 NEW ADDRESS - Effective..." on
+>   the exact same four forwards. Outlook has identical data and makes an identical call, so the
+>   heuristic in `triage_engine.fresh()` is now BETTER than what the mail client does, not a
+>   workaround for a gap on our side. Two partial exceptions: `-- ` (RFC 3676 dash-dash-space) is
+>   the nearest standard and is matched, though Outlook never emits it; and **`uniqueBody`** is the
+>   Graph field that would help - it strips quoted thread history server-side, more reliably than
+>   our `From:`/`________` split - but it is **not supported in `$select` on a collection** (one GET
+>   per message: ~330 extra Graph calls per backfill instead of a few delta pages) AND it would
+>   still not strip signatures, since the sender's signature IS their unique contribution. Fixes the
+>   smaller half of the problem at large cost; rejected.
+> - **Future option if the regex starts leaking: detect boilerplate by REPETITION.** A signature is
+>   text recurring across many messages from the same sender, and per-sender trails are already
+>   stored. That would learn Star's block plus every vendor's with no patterns written by hand. Real
+>   machinery, so only worth it if the heuristic proves insufficient.
+> - **LANE DISPLAY CAP (`LANE_CAP = 25`).** Ethan's mailbox ran **71 of 111 visible rows in "Worth
+>   knowing"**, and his framing settles the fix: *"I don't really get any spam or trash so almost all
+>   of my inbox is fair as fyi."* **The classification is CORRECT - the problem is the view, so do
+>   NOT re-tune rules to shrink fyi.** Any lane over 25 now renders its top slice with a
+>   "Show all N - N-25 more below the top 25" footer (`LaneMore`). Three details that matter:
+>   the cap runs AFTER the sort comparator, so "top 25" means top 25 by the ACTIVE sort (importance
+>   by default, newest if switched) and the button names it; capping is SKIPPED while searching,
+>   because a search is the user narrowing things down already; and expansion is session-only state,
+>   so every visit starts tidy.
+> - **Digest control is now a DEAD LABEL, not a switch.** It read "Daily digest email [toggle]
+>   COMING SOON" and was flipped ON in Ethan's screenshot - a preference that stores fine and then
+>   sends nothing for a week is a trust cost on the feature we most need people to trust. Now plain
+>   text + a "coming soon" chip. `toggleDigest` and `user_prefs.digest_enabled` are BOTH still wired
+>   and the function is kept (with an eslint-disable and a comment), so restoring the switch the day
+>   Mail.Send + the Container Apps Job land is a one-line change.
+> - **Ethan is dismissing his own Salam triage-test forwards** - their subjects carry his
+>   annotations ("Cleanup -> action required"), so correcting them would train the suggester on
+>   synthetic mail.
+> - `npm run build` clean (1761 modules, 497 KB). Test suites unchanged and still green: 39 cases,
+>   9 invariants, 12 suggester checks.
+
+> - **FIFTH PASS - `POST /api/email/resync` replaces the psql delta reset, and a REAL BUG it
+>   exposed: manual corrections did not survive a sync.**
+> - **The bug:** only `_retriage` skipped `decided_by == "user:manual-move"`. `sync_user` did NOT,
+>   so re-touching a thread - a full resync, or ANY sync where that thread changed - silently
+>   reverted the user's hand-filed verdict. That is the single most trust-destroying thing this
+>   feature could do, and it was one delta reset away from happening to all three pilot mailboxes.
+> - **Fix: a MANUAL HOLD in `_triage_thread`, mirroring the dismiss semantics.** New additive column
+>   `email_threads.manual_msg_id` stamps the message id the user's verdict was made against
+>   (set in `reclassify_thread`). While `manual_msg_id == last_message_id` the engine refreshes
+>   `signals_json` (so a later correction is recorded against current facts) but LEAVES the state,
+>   rank, reason and decided_by alone. A genuinely new message on the thread releases the hold, same
+>   as a dismiss. `_retriage`'s early `continue` stays as a cheap short-circuit; the hold in
+>   `_triage_thread` is the real guarantee, since it covers the sync path too.
+>   **4 new checks in `test_suggester.py` pin all of it** (recorded with the right msg id / resync
+>   does not revert / signals still refresh under the hold / new message releases it). 16 checks
+>   pass.
+> - **CLARIFYING WHAT WAS AND WAS NOT AT RISK (Ethan asked whether resync would have deleted user
+>   RULES - it would not, and the separation he suggested already exists):**
+>   - **NEVER touched by sync/resync/retriage:** `triage_rules` (per-user hard + soft rules),
+>     `triage_feedback` (the correction snapshots), `triage_suggestions`, and
+>     `user_prefs.triage_rules_json` / `triage_profile`. Sync only ever READS `triage_rules` -
+>     in `_user_rules()` to evaluate them and in `_bump_rule_hits()` to increment `hit_count`.
+>     It has no delete or overwrite path to any of them.
+>   - **Rewritten by sync/resync:** `email_threads` (the mail + its verdict) and
+>     `email_sync_state` (the delta tokens, cleared deliberately). That is the whole blast radius.
+>   - So the bug was narrower than "corrections are lost": a hand-moved thread's LANE lived in the
+>     volatile table with no protection. **The durable path was always safe** - a correction that
+>     had been promoted into an accepted rule would simply re-apply on resync and produce the right
+>     lane again, and `triage_feedback` kept the evidence either way, so the suggester never lost
+>     learning data. What reverted was the one-off, not-yet-ruled override.
+>   - **This is the intended architecture, now correct rather than merely intended:** durable intent
+>     belongs in `triage_rules`; a manual move is a single-thread override that holds until the
+>     thread actually changes. `manual_msg_id` is the only schema addition needed - no separate
+>     table, because the rules already have theirs.
+> - **Why resync is an ENDPOINT and not a documented SQL statement:** some fixes change how a
+>   message is PARSED rather than how it is judged - `fresh()` signature stripping is the first and
+>   there will be more. Stored snippets are built at sync time, so `retriage` (which reads the
+>   stored snippet) cannot reach them, and Graph delta never returns an unchanged message. The only
+>   route is re-fetching. Ethan could not run the psql one-liner (no native `psql` - the Aug DB
+>   migration used the `postgres:18` Docker image for exactly that reason - and it was written with
+>   bash `$DATABASE_URL`, not PowerShell `$env:`). Per-mailbox SQL also does not scale past three
+>   pilot users and cannot be handed to a non-technical one. So: one authenticated call, no DB
+>   access. Clears `email_sync_state.inbox_delta`/`sent_delta`, re-runs `sync_user`, returns the
+>   overview with `fullResync: true`. ~80s + 1-2 cents vs ~19s for a normal Refresh.
+> - **UI: a "Rebuild from Outlook" button in the Rules tab's new MAINTENANCE section** - not beside
+>   Refresh, where it would get mis-clicked. Copy states the cost and that hand-moved threads stay
+>   put.
+> - **THIS REPLACES BOTH earlier deploy instructions** (the `retriage?model=true` step AND the
+>   `UPDATE email_sync_state ...` SQL). After deploying: open the Email tab -> Triage rules ->
+>   Rebuild from Outlook, once per pilot mailbox. It rebuilds snippets, re-triages with the model
+>   pass (recovering anything the old ack rule swallowed), and preserves corrections.
+> - **PowerShell note for anything like this in future:** `$DATABASE_URL` is bash; PowerShell wants
+>   `$env:DATABASE_URL`. And there is no `psql` on this machine - reach for the project venv
+>   (`backend/.venv/Scripts/python.exe`, which loads `backend/.env` through `database.py`
+>   automatically) or the `postgres:18` Docker image, not a bare `psql`.
+
+> - **RESEARCH CLOSED: "open the row in the Outlook DESKTOP app" is NOT POSSIBLE for New Outlook.**
+>   Do not re-derive this. Ethan asked for it pre-deployment 2026-09-02; diagnosed on his machine.
+> - **What his machine actually runs (read from the registry / appx manifest, not assumed):**
+>   - `olk.exe` from `Microsoft.OutlookForWindows_1.2026.818.100_x64__8wekyb3d8bbwe` = **NEW
+>     Outlook**. **Classic `OUTLOOK.EXE` is NOT INSTALLED** (absent from
+>     `HKLM\...\App Paths\OUTLOOK.EXE`).
+>   - The `outlook:` protocol is registered NOWHERE (`HKCU\Software\Classes\outlook` and
+>     `HKCR\outlook` both absent). **That is why Win+R `outlook:inbox` offered a Microsoft Store
+>     search and the Store found nothing** — Windows offers a Store lookup for ANY unregistered
+>     scheme, and no Store app registers `outlook:`. It was never an "Outlook is missing" problem.
+>   - New Outlook's appx manifest registers protocols **`ms-outlook`, `mailto`, `webcal`,
+>     `webcals`** and declares `windows.appUriHandler` for **outlook.office.com,
+>     outlook.office365.com, outlook.cloud.microsoft**.
+> - **THE VERDICT PER CLIENT:**
+>   | Client | Per-message desktop deep link? | How |
+>   |---|---|---|
+>   | Classic Outlook (Win32) | YES | `outlook:<hex EntryID>`, invoked `OUTLOOK.EXE /select "outlook:<hex>"` |
+>   | **New Outlook (`olk.exe`)** | **NO** | Microsoft ships no URI scheme for a specific message on Windows |
+>   | Outlook mobile (iOS/Android) | YES | `ms-outlook://emails/message?id=...` |
+> - **Why New Outlook cannot do it, two independent reasons:** (1) EntryID is a **MAPI** construct
+>   and New Outlook has **no MAPI and no COM** at all - it is a web wrapper; (2) `ms-outlook://`
+>   message deep links are an **iOS/mobile-only** feature - there are Microsoft Q&A threads titled
+>   exactly "ms-outlook:// URL scheme does not work for Windows". Microsoft's own answer: *"there
+>   currently isn't a direct URI scheme method to open a specific email in the Outlook desktop
+>   app"* (Power Automate is the only workaround they name).
+> - **The appUriHandler is a DEAD END from our app, and the reason is worth remembering: app URI
+>   handlers do not fire on link clicks made INSIDE a browser.** Chrome/Edge already hold the URL
+>   and open a tab; they never ask Windows whether an installed app claims that host. App URI
+>   handlers fire when the OS resolves a URL (Run dialog, Start, a non-browser app). Custom SCHEMES
+>   are the opposite - browsers hand unknown schemes to the OS - which is why `outlook:` works for
+>   Classic and `https://outlook.office365.com/...` never will.
+> - **CORRECTION to an earlier claim in this session:** registering the `outlook:` protocol does
+>   NOT require admin / DataNet. `HKEY_CURRENT_USER\Software\Classes\outlook` is merged into
+>   HKEY_CLASSES_ROOT for that user and HKCU needs no elevation. The Intune/MOTW comparison was
+>   wrong. (DataNet would still be the right route for FLEET-wide consistency, and Ethan confirmed
+>   they are willing - they already scoped his starbot requests - but they cannot fix New Outlook;
+>   that is a Microsoft product gap.)
+> - **SHIPPED INSTEAD (1 line, works on every client): the row anchor uses a NAMED target
+>   (`target="starbotMail"`) rather than `_blank`,** so every row reuses ONE Outlook tab instead of
+>   stacking one per click. Working a 9-thread reply lane used to leave 9 tabs open. This addresses
+>   the actual daily annoyance for New Outlook and mobile users, who cannot be given the desktop app.
+> - **IF the Classic path is ever wanted** (only worth it if a real share of users are on Classic -
+>   note Ethan himself is on New Outlook and so CANNOT test it on his own machine): per-user
+>   registry registration, no admin -
+>   `New-Item "HKCU:\Software\Classes\outlook\shell\open\command" -Force`, set `(default)` =
+>   `URL:Outlook Protocol` and `URL Protocol` = `""` on the parent, and the command to
+>   `"<OUTLOOK.EXE path>" /select "%1"` (get the path from
+>   `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\OUTLOOK.EXE`). Then the code side:
+>   batched `POST /me/translateExchangeIds` at sync (`sourceIdType: restId`, `targetIdType:
+>   entryId`, up to 1000 ids per call, so ONE extra POST per sync), **convert the returned
+>   URL-safe-base64 entryId to HEX** (the protocol wants hex, Graph returns base64url), store the
+>   hex on the thread row (~200 bytes), and gate it behind a per-user preference defaulting OFF so
+>   New Outlook and phone users keep the OWA link and nobody gets rows that silently do nothing.
+> - **Strategic note:** Microsoft is moving everyone to New Outlook (Classic supported to 2029 but
+>   the direction is set), so the payoff on Classic-only deep linking shrinks every quarter. Weigh
+>   that before spending the hour.
+
+> - **CORRECTIONS to the Outlook-deeplink note above (Ethan asked for sources; two claims did not
+>   survive checking).** Keep these straight, because the Classic path IS worth building later.
+>   1. *"Microsoft's own answer: there currently isn't a direct URI scheme method..."* was a SEARCH
+>      ENGINE PARAPHRASE, not a quote. The real verbatim answer is weaker: MS moderator Katherine,
+>      2024-09-18, *"I tested it for you on my side and it seems that now we can only do this by
+>      PowerAutomate."* A support-forum moderator, not documentation.
+>      (learn.microsoft.com/en-us/answers/questions/4661350)
+>   2. *"`ms-outlook://` message links are iOS/Android only"* was **UNSOURCED INFERENCE**. The
+>      Windows thread (Faery Fu-MSFT, 2023-09-19,
+>      learn.microsoft.com/en-us/answers/questions/1371335) only says `ms-outlook://` did not launch
+>      Outlook on Windows and points at a registry workaround. **It never discusses message ids.**
+> - **OPEN, UNTESTED AVENUE worth 30 seconds someday:** that 2023 thread PREDATES New Outlook, and
+>   `olk.exe`'s own appx manifest registers the **`ms-outlook`** protocol - so the scheme IS live on
+>   a New Outlook machine today. Whether it accepts a message identifier is untested by anyone in
+>   those threads. Probe: Win+R -> `ms-outlook://` (does olk.exe come up?), then try a message form.
+>   What IS still solid: New Outlook has no MAPI/COM (Microsoft's own documented feature gaps), so
+>   the `outlook:<hex EntryID>` route is genuinely impossible there regardless.
+> - **CLIENT MIX (Ethan, 2026-09-02) - this changes the calculus in favour of building the Classic
+>   path:** *"I honestly imagine most of my users will stay on classic outlook until they simply
+>   can't. I at least know my office staff, management and boss use classic."* So Salam, the office
+>   staff and management are on **Classic** - i.e. the users who most need the reply lane are
+>   exactly the ones `outlook:<hex EntryID>` would serve. Ethan himself is the New Outlook outlier,
+>   which is only a testing inconvenience, not a reason to skip it. **Downgrade the earlier
+>   "payoff shrinks every quarter" note accordingly** - still true long-term, but the near-term
+>   audience is real. Ethan is also fine bringing DataNet in (they already scoped his starbot
+>   requests), which makes fleet-wide registry deployment straightforward.
+> - **REVERTED: the named-tab change.** Rows go back to `target="_blank"` (a new tab each).
+>   Ethan's reasoning, which is better than mine: the OWA deeplink renders that ONE message with no
+>   inbox around it, so reusing a single tab destroys the message you were reading. Stacking lets
+>   you open several, return to Starbot, and decide what to do next. A comment in `Email.jsx` says
+>   not to "fix" this into a shared tab again.
+
+> **Resume note (2026-09-02) - TRIAGE ENGINE SPLIT (signals + decide) + PER-USER RULES + FEEDBACK LOOP. Built + tested, NOT committed/deployed.**
+> - **Why the rewrite:** `_triage_deterministic` was a cascade of **12 early returns**, so (a) rule
+>   ORDER silently decided outcomes (recorder-bot ran before the hit-list account check, so a real
+>   customer whose sender name matched went to Cleanup at rank 5), (b) rules SHADOWED each other
+>   ("Ticket #4412 has been resolved" hit the ticket rule and went to the model, so the closure rule
+>   written for exactly that case never ran), and (c) nothing recorded WHY, so "this was classified
+>   wrong" could not be traced to the rule that did it. The `strong` predicate was 9 interacting
+>   booleans and threw its evidence away on the losing branch, so the audit line lied about why a
+>   thread landed where it did.
+> - **New shape - `backend/triage_engine.py`:** `collect_signals()` observes everything and NEVER
+>   returns early (23 signals, stored per thread as `email_threads.signals_json`, ~250 bytes);
+>   `decide()` walks a priority-ordered rule list as DATA and stamps `email_threads.decided_by`
+>   with the rule that fired. Precedence, stated once: **structural -> user hard rules -> tier 1 ->
+>   tier 2 (if enabled) -> deterministic scoring -> model.**
+> - **THE TIERING DECISION (Ethan, 2026-09-02): do NOT ship the 12 tuned rules into new inboxes.**
+>   All of them were tuned against ONE IT-admin mailbox, and inheriting that gives a salesperson an
+>   IT admin's idea of what matters (demoting cold outreach is right for IT, wrong for sales whose
+>   job it is). Three tiers, all 17 rules kept in the registry as a log:
+>   - **STRUCTURAL (3, always on, not editable):** empty thread, note-to-self, you-spoke-last. Facts
+>     about thread shape, not opinions - no rule should claim you didn't send a message you sent.
+>   - **TIER 1 (5, default on, user may disable):** bulk sender / unsubscribe copy / notification
+>     subject / out-of-office / explicit closure. Mechanical automation detection - nobody should
+>     have to teach the bot that a newsletter is a newsletter.
+>   - **TIER 2 (9, seeded but INACTIVE on a new inbox):** recorder-bot, ticket-update, ack,
+>     colleague-covered, colleague-verify, replied-elsewhere, cold-outreach, robot-sender,
+>     answered-statement. Offered per-user once that user's own corrections corroborate them.
+>   - **Migration rule (no hardcoded emails): a mailbox that ALREADY has triaged threads keeps the
+>     rules that produced it; a brand-new mailbox starts clean.** `email_triage.ensure_rule_set()`
+>     runs once per user at the top of `sync_user` and writes `user_prefs.triage_rules_json`.
+> - **THREE REAL BUGS FIXED (two were latent in production):**
+>   1. **`_ACK` swallowed real work.** `^(got it|thanks|...)[^?]{0,80}$` let 80 free characters
+>      follow the ack word, so **"Thanks Ethan, also send the invoice to Marc."** matched -> resolved,
+>      rank 0 -> **and resolved threads were never rendered, so it was invisible AND uncorrectable.**
+>      Narrowed to ack word + optional name + optional short closing clause.
+>   2. **`_RECORDER_BOT` had no word boundary** - "Bread AI", "Thread Assistant", "Spread Support"
+>      all matched and went to Cleanup at rank 5. Anchored with a word boundary.
+>   3. **"colleague replied" fired on a colleague's FIRST message.** The old test was only "internal
+>      and last inbound is not me", so a colleague opening a thread with a direct question ("can you
+>      get me the mileage sheet today?") was labelled "colleague replied - verify it covers what was
+>      asked of you" and sent to the model instead of straight to the reply lane. Missing precondition
+>      was `msg_count > 1`. **The eval harness caught this on its first run.**
+> - **Also fixed by the restructure:** tier-1 closure now runs BEFORE the tier-2 ticket rule, so a
+>   closed DataNet ticket resolves deterministically instead of burning a Haiku call and depending
+>   on the model getting it right.
+> - **EVAL HARNESS (`backend/tests/`) - the missing safety net.** `test_triage.py` + 21 fixture cases
+>   in `fixtures/cases.json` (every "don't relearn these" case from the 2026-08-21 note, expressed as
+>   data) plus 7 invariant checks. Dependency-free: `collect_signals`/`decide` are pure, so no
+>   Postgres, no Graph, no model, no tokens. **Run it: `cd backend && python tests/test_triage.py`.**
+>   `test_suggester.py` covers the full correction -> suggestion -> rule loop against a SQLite
+>   in-memory DB injected in place of `database` (NEVER touches prod). Both suites pass (21/21 + 7,
+>   and 12/12). **When a worker reports a wrong verdict, add it to `cases.json` with the lane it
+>   belonged in** - corrections become regression tests instead of one-off regex edits.
+> - **PER-USER RULES + THE LEARNING LOOP (Ethan's design, 2026-09-02):**
+>   - **Correction = moving a thread between lanes.** Row-level "move" control (CornerUpRight icon)
+>     -> panel with the other lanes + optional one-tap WHY chips (Not a task / Not my area / Already
+>     handled / Misread the sender / This IS a task). `POST /api/email/threads/{id}/reclassify`.
+>   - **`triage_feedback` stores a SNAPSHOT, not just the action** - the signal set, `decided_by`,
+>     predicted state/rank, sender, domain, subject. The action alone cannot be turned into a rule;
+>     without the signals a suggester can only pattern-match on sender and produces shallow rules.
+>     No FK to email_threads on purpose: threads prune at 90 days, the lesson shouldn't.
+>   - **Two rule kinds:** `hard` (deterministic, matched in `decide()`, free + instant + re-runnable)
+>     and `soft` (plain-language judgment line injected into the Haiku prompt AFTER the company
+>     instructions so a user's own instruction wins a disagreement).
+>   - **"About your job" paragraph** (`user_prefs.triage_profile`) rides into the prompt. For the
+>     judgment path this outperforms a stack of rules - "I'm IT admin, DataNet tickets are my actual
+>     work" flips a large share of one person's verdicts on its own.
+>   - **SUGGESTER: 3+ corrections sharing a pattern -> a proposed rule, approval ALWAYS required.**
+>     One correction is a one-off, two is a coincidence. Four candidate shapes, most specific first:
+>     sender, whole domain (only when 2+ different senders at it), **"the rule X keeps being wrong,
+>     turn it off"** (the highest-value one - retires a bad default for one person instead of leaving
+>     them to fight it thread by thread), and signal-across-3+-senders. Rejected patterns are
+>     remembered and NEVER re-proposed. "Already handled" is excluded from generalizing at all - it
+>     is a statement about that thread's history, not about the sender.
+>   - **Rules tab** ("Triage rules" button beside the filter chips, `frontend/src/EmailRules.jsx`):
+>     suggestions first, then your rules (with hit counts + "never matched" flags + delete/toggle),
+>     then About your job, then ALL built-in rules grouped by tier with toggles - structural ones
+>     shown but locked, because a rule you cannot see is a rule you cannot trust.
+>   - **Re-run on save:** hard-rule edits trigger a FREE deterministic replay over stored threads
+>     (`_retriage(run_model=False)`, no Graph, no tokens) and the UI reports "N threads re-sorted".
+>     `POST /api/email/retriage?model=true` also re-judges the ambiguous remainder (~1-2 cents for a
+>     30-day mailbox) - needed for soft rules to take effect on existing threads. Two safeguards: a
+>     thread the user moved by hand (`decided_by == "user:manual-move"`) is NEVER re-decided, and a
+>     rules-only pass leaves a thread alone rather than stranding it in state "model" (not a lane).
+> - **NEW: "Handled" lane** (collapsed by default). Resolved/waiting threads were counted but never
+>   rendered, so the engine's worst failure - a real ask silently hidden - generated ZERO feedback.
+>   Now recoverable and correctable. Their absence from the lanes above is still the feature.
+> - **Files:** NEW `backend/triage_engine.py`, `backend/triage_feedback.py`, `backend/tests/`
+>   (test_triage.py, test_suggester.py, fixtures/cases.json), `frontend/src/EmailRules.jsx`.
+>   CHANGED `backend/email_triage.py` (cascade -> `_triage_thread` + `_user_rules` +
+>   `ensure_rule_set` + `_bump_rule_hits`; model prompt takes per-user guidance and the per-thread
+>   hint; `_overview` gains the handled lane), `models.py` (TriageRule / TriageFeedback /
+>   TriageSuggestion + `email_threads.signals_json`/`decided_by` + `user_prefs.triage_rules_json`/
+>   `triage_profile`), `schemas.py` (ThreadReclassifyIn / TriageRuleIn / TriageProfileIn),
+>   `main.py` (DDL + router), `frontend/src/api.js` (9 helpers), `frontend/src/Email.jsx`.
+> - **Verified:** both test suites pass; all backend modules import clean; 9 new routes present;
+>   `npm run build` clean (1761 modules, 496 KB). **NOT verified against a live mailbox** - no
+>   uvicorn was started (Ethan's own dev servers may own :8000/:5173) and the local `.env` points at
+>   PRODUCTION Postgres. Nothing was run against prod.
+> - **NEXT (in order):** (1) Ethan reviews + commits + deploys (acr build + containerapp update).
+>   (2) Feed the worker feedback batch into `fixtures/cases.json` as labelled cases and re-run the
+>   scorer - that is what turns their corrections into permanent regression tests. (3) On first
+>   deploy, existing mailboxes auto-seed the legacy tier-2 set (verify in the Rules tab), new ones
+>   get tier 1 only. (4) Still pending from before: Mail.Send + Container Apps Job = digest phase 2
+>   complete; then phase 3 (autodrafts + move-to-trash, needs Mail.ReadWrite), meeting-minutes tab,
+>   product catalog, mileage purpose field.
+
+> **Resume note (2026-09-01) - Email refinements + phase-2 digest content SHIPPED (rev starbot--emailv2, commit 1d9f945). Digest still not SENDING (Mail.Send).**
 > - **Live:** commit `1d9f945` on image `starbot:email-refinements` (build `ds1g`, 62s), revision
 >   `starbot--emailv2` at 100% traffic. Rollback target `starbot--newdbpass` on `starbot:shared-boards`
 >   kept Active at 0%. Cron `business-hours` scale rule survived the update (verified via `containerapp
