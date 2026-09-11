@@ -133,8 +133,19 @@ This file is the single source of truth for picking the project back up. Read it
 
 > **UI ACCESSIBILITY PASS (2026-09-11) - larger text/touch-targets, darker muted grays, wider
 > content area, button hover feedback, looser line-height. Frontend-only, no backend/schema
-> changes. Built + visually reviewed by Ethan in local dev across this session; committing now,
-> deploy to follow (Ethan runs push + `az acr build`/`containerapp update` himself, per usual).**
+> changes. Committed as `90e3ba4`, built + visually reviewed by Ethan in local dev across this
+> session.**
+> - **PUSHED + DEPLOYED (per Ethan):** `git push` sent this commit to GitHub together with the
+>   previously-stranded `50c721d` (see below - it had never actually reached `origin/main` despite
+>   an earlier note in this file claiming it had). Ethan then ran `az acr build --registry
+>   cadd18599bd0acr --image starbot:ui-a11y .` followed by `az containerapp update -n starbot -g
+>   starbot --image cadd18599bd0acr.azurecr.io/starbot:ui-a11y` himself, per usual. **Not
+>   independently verified from this session** (no Azure CLI access here) - a future session
+>   should confirm with `az containerapp revision list -n starbot -g starbot -o table` before
+>   treating "ui-a11y is live" as ground truth, same caution this file applies to every other
+>   deploy claim.
+> - **Rollback target, if needed:** `starbot--triagerules` (image tag `triage-rules`) was the
+>   revision live immediately before this one.
 > - **Why:** make StarCRM easier to use for older/less-technical staff. Specific complaints came
 >   from Ethan looking at real screenshots mid-session, not guessed at up front (e.g. the
 >   Mileage "Pull from my calendar" label called out twice before it actually read as dark enough).
