@@ -18,11 +18,20 @@ class ContactIn(BaseModel):
     email: str = ""
     phone: str = ""            # legacy single number; still accepted
     phones: list = []          # list of {type, number} — cell/work/home/other
+    address: str = ""          # optional postal address
     category: str = "bd"
     categoryLabel: str = ""  # free-text label used when category == "other"
     nextAction: str = ""
     nextDue: str = ""
-    notes: str = ""
+    # Freeform `notes` was retired 2026-09 — it let anyone bypass the
+    # interaction-log audit trail (no attribution, no timestamp, no edit
+    # history) just by using the edit form instead of "Log note". `note`
+    # replaces it: an OPTIONAL log entry seeded at contact creation only
+    # (create_contact appends it as a real, attributed Interaction).
+    # update_contact ignores it — editing structured fields shouldn't also
+    # silently inject a log entry; further notes go through the dedicated
+    # log-note endpoints, which support edit/delete with attribution.
+    note: str = ""
     # (cardImage removed 2026-07 — scans prefill fields but photos aren't stored.
     # Older clients may still send the key; pydantic ignores unknown fields.)
 
@@ -30,6 +39,10 @@ class ContactIn(BaseModel):
 class LogIn(BaseModel):
     note: str
     date: Optional[str] = None  # defaults to today on the server if omitted
+
+
+class LogEditIn(BaseModel):
+    note: str
 
 
 class UserIn(BaseModel):

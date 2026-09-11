@@ -16,14 +16,18 @@ CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 _PROMPT = (
     "You are reading a business card for a flooring & remodeling company's CRM. "
     "Return ONLY a JSON object with exactly these keys: name, company, role, "
-    "email, phones, category.\n"
+    "email, phones, address, category.\n"
     "- name: the person's full name.\n"
     "- company, role: strings ('role' is the job title). Empty string if absent.\n"
     "- email: string, empty if absent.\n"
     "- phones: an ARRAY of objects {type, number}, one per phone number on the "
-    "card. 'type' is one of 'cell', 'work', 'home', 'other' — infer from labels "
+    "card — include ALL of them, even fax and toll-free. 'type' is one of "
+    "'cell', 'work', 'home', 'fax', 'tollfree', 'other' — infer from labels "
     "(C/cell/mobile/M -> cell; O/office/direct/main/tel -> work; H/home -> home; "
-    "fax -> other). If a number has no label, use 'work'. Empty array if none.\n"
+    "F/fax -> fax; TF/toll-free/toll free -> tollfree). If a number has no "
+    "label, use 'work'. Empty array if none.\n"
+    "- address: the full postal/street address as printed on the card (street, "
+    "city, state, zip), as one string. Empty string if the card has no address.\n"
     "- category: the best-fit CRM relationship type, ONE of: gc (general "
     "contractor), sub (subcontractor/trade), vendor (materials or product "
     "supplier), property (property management company or landlord), client "
@@ -40,9 +44,9 @@ _CATEGORIES = {
     "bd", "gc", "vendor", "property", "client", "sub",
     "designer", "insurance", "healthcare", "other",
 }
-_PHONE_TYPES = {"cell", "work", "home", "other"}
+_PHONE_TYPES = {"cell", "work", "home", "fax", "tollfree", "other"}
 
-_EMPTY = {"name": "", "company": "", "role": "", "email": "", "phone": "", "phones": [], "category": "bd"}
+_EMPTY = {"name": "", "company": "", "role": "", "email": "", "phone": "", "phones": [], "address": "", "category": "bd"}
 
 
 def downscale_to_jpeg(raw: bytes, max_dim: int = 1200, quality: int = 85) -> bytes:
@@ -76,7 +80,7 @@ def extract_fields(jpeg_bytes: bytes) -> dict:
     """Call Claude vision to pull structured contact fields from a card image.
 
     Raises RuntimeError if the API key is missing. Always returns a dict with
-    the five expected keys (empty strings where the model omits them).
+    the expected keys (empty strings/lists where the model omits them).
     """
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
@@ -118,13 +122,13 @@ def coerce_fields(text: str) -> dict:
     """Parse the model's JSON, tolerating stray prose or code fences. Validates
     category + phone types against the known sets, and always returns `phone`
     (the primary number) for older callers alongside the `phones` array."""
-    fields = {"name": "", "company": "", "role": "", "email": "", "phone": "", "phones": [], "category": "bd"}
+    fields = {"name": "", "company": "", "role": "", "email": "", "phone": "", "phones": [], "address": "", "category": "bd"}
     try:
         start, end = text.find("{"), text.rfind("}")
         if start == -1 or end == -1:
             return fields
         data = json.loads(text[start : end + 1])
-        for k in ("name", "company", "role", "email"):
+        for k in ("name", "company", "role", "email", "address"):
             v = data.get(k, "")
             fields[k] = str(v).strip() if v is not None else ""
 

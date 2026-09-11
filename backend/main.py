@@ -12,7 +12,7 @@ Run locally:
 import json
 import os
 from contextlib import asynccontextmanager
-from datetime import date as date_cls
+from datetime import date as date_cls, datetime
 from pathlib import Path
 
 from fastapi import Cookie, Depends, FastAPI, File, Header, HTTPException, UploadFile
@@ -39,8 +39,7 @@ import telemetry
 import triage_feedback
 from database import DATABASE_URL, Base, engine, get_db
 from models import Contact, Interaction, User
-from schemas import ChatIn, ContactIn, LogIn, TodoIn, TodoPatch, UserIn
-from seed import SEED_CONTACTS
+from schemas import ChatIn, ContactIn, LogEditIn, LogIn, TodoIn, TodoPatch, UserIn
 
 
 def _ensure_schema() -> None:
@@ -63,6 +62,19 @@ def _ensure_schema() -> None:
         # existing single `phone` values are surfaced as a one-entry list by
         # serialize() until the contact is next edited.
         conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS phones_json TEXT"))
+        # Optional postal address (most business cards have one). Additive;
+        # shown on the detail view only, deliberately left off the list table.
+        conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS address TEXT"))
+        # Log-note attribution + edit/soft-delete (mirrors account_interactions.by,
+        # since the profile switcher means a note's author isn't always the
+        # contact's owner). Additive; existing notes get by='' (pre-dates this).
+        conn.execute(text("ALTER TABLE interactions ADD COLUMN IF NOT EXISTS by VARCHAR DEFAULT ''"))
+        conn.execute(text("ALTER TABLE interactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now()"))
+        conn.execute(text("ALTER TABLE interactions ADD COLUMN IF NOT EXISTS edited_by VARCHAR"))
+        conn.execute(text("ALTER TABLE interactions ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE interactions ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE interactions ADD COLUMN IF NOT EXISTS deleted_by VARCHAR"))
+        conn.execute(text("ALTER TABLE interactions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP"))
         # Card-image storage removed 2026-07 (space + UI cleanup; scans still
         # prefill contacts, the photo just isn't kept). Blobs were exported to
         # ~/Documents/starbot-card-image-backup before this shipped.
@@ -163,12 +175,14 @@ except Exception as _mcp_err:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup/shutdown. Applies the additive schema migration, seeds the demo
-    profile on an empty DB and, when the connector is mounted, runs the MCP
-    session manager's lifespan. Schema work happens HERE rather than at import
-    so an unreachable database is a startup error, not a silent hang."""
+    """Startup/shutdown. Applies the additive schema migration, seeds
+    company-wide data, runs the one-time notes-to-log-note backfill and, when
+    the connector is mounted, runs the MCP session manager's lifespan. Schema
+    work happens HERE rather than at import so an unreachable database is a
+    startup error, not a silent hang."""
     _ensure_schema_or_explain()
     _seed_on_first_run()
+    _migrate_notes_to_log()
     if _mcp_app is not None:
         async with _mcp_app.router.lifespan_context(_mcp_app):
             yield
@@ -218,9 +232,14 @@ def _contact_phones(c: Contact) -> list:
 def serialize(c: Contact) -> dict:
     """Return a contact in the exact shape the React frontend expects.
 
-    Interactions are sorted newest-first so the activity log reads top-down.
+    Interactions are sorted newest-first (by date, then insert order within a
+    day) so the activity log reads top-down. Soft-deleted notes are split into
+    their own `deletedLog` list rather than dropped, for auditing.
     """
-    log = sorted(c.interactions, key=lambda i: i.date, reverse=True)
+    active = [i for i in c.interactions if not i.deleted]
+    removed = [i for i in c.interactions if i.deleted]
+    log = sorted(active, key=lambda i: (i.date, i.created_at or datetime.min), reverse=True)
+    deleted_log = sorted(removed, key=lambda i: i.deleted_at or datetime.min, reverse=True)
     phones = _contact_phones(c)
     return {
         "id": c.id,
@@ -230,13 +249,27 @@ def serialize(c: Contact) -> dict:
         "email": c.email or "",
         "phone": phones[0]["number"] if phones else (c.phone or ""),
         "phones": phones,
+        "address": c.address or "",
         "category": c.category or "bd",
         "categoryLabel": c.category_label or "",
         "nextAction": c.next_action or "",
         "nextDue": c.next_due or "",
-        "notes": c.notes or "",
         "created": c.created_at.date().isoformat() if c.created_at else "",
-        "log": [{"date": i.date, "note": i.note} for i in log],
+        "createdAt": c.created_at.isoformat() if c.created_at else "",  # full timestamp, for precise newest-first sort
+        "log": [
+            {
+                "id": i.id, "date": i.date, "note": i.note, "by": i.by or "",
+                "editedBy": i.edited_by or "", "editedAt": i.edited_at.isoformat() if i.edited_at else "",
+            }
+            for i in log
+        ],
+        "deletedLog": [
+            {
+                "id": i.id, "date": i.date, "note": i.note, "by": i.by or "",
+                "deletedBy": i.deleted_by or "", "deletedAt": i.deleted_at.isoformat() if i.deleted_at else "",
+            }
+            for i in deleted_log
+        ],
     }
 
 
@@ -256,36 +289,6 @@ def _clean_phones_payload(payload) -> tuple[str, str]:
         phones.append({"type": "", "number": payload.phone.strip()[:40]})
     phones = phones[:8]
     return json.dumps(phones), (phones[0]["number"] if phones else "")
-
-
-def load_seed(db: Session, user: User) -> None:
-    """Replace one user's contacts with the original demo set.
-
-    Seed IDs are generated fresh (not taken from the seed data) so multiple
-    users can each hold the demo set without primary-key collisions.
-    """
-    db.query(Contact).filter(Contact.user_id == user.id).delete(
-        synchronize_session=False
-    )
-    for item in SEED_CONTACTS:
-        contact = Contact(
-            user_id=user.id,
-            name=item["name"],
-            company=item.get("company", ""),
-            role=item.get("role", ""),
-            email=item.get("email", ""),
-            phone=item.get("phone", ""),
-            category=item.get("category", "bd"),
-            next_action=item.get("nextAction", ""),
-            next_due=item.get("nextDue", ""),
-            notes=item.get("notes", ""),
-        )
-        for entry in item.get("log", []):
-            contact.interactions.append(
-                Interaction(date=entry["date"], note=entry["note"])
-            )
-        db.add(contact)
-    db.commit()
 
 
 def get_current_user(
@@ -334,22 +337,68 @@ def _get_or_404(db: Session, user: User, contact_id: str) -> Contact:
 
 
 def _seed_on_first_run() -> None:
-    """On an empty database, create the initial 'Bob Bendixen' profile and seed
-    his 26 contacts so the app opens populated. New users start blank. Called
-    from the lifespan handler above."""
+    """Seed company-wide, user-independent data on startup. Every real user
+    profile now comes from M365 sign-in (auth.user_from_claims creates one on
+    first use) — no demo user or demo contacts are seeded here anymore; a new
+    profile just starts blank. Called from the lifespan handler above."""
     db = next(get_db())
     try:
-        if db.query(User).count() == 0:
-            bob = User(name="Bob Bendixen")
-            db.add(bob)
-            db.commit()
-            db.refresh(bob)
-            load_seed(db, bob)
         # Shared accounts seed their own 5 pilot rows (independent of users —
         # self-guards on an empty accounts table, so it runs once).
         accounts.seed_accounts(db)
         # Triage glossary (email_triage) seeds itself the same way.
         email_triage.seed_glossary(db)
+    finally:
+        db.close()
+
+
+def _migrate_notes_to_log() -> None:
+    """One-time backfill (2026-09): the freeform `notes` field let anyone
+    bypass the interaction-log audit trail entirely — no attribution, no
+    timestamp, no edit history, just overwrite it via the edit form — so it's
+    retired from the API/UI in favor of log notes (which support edit/delete,
+    both attributed). Existing content is preserved as a single legacy log
+    note per contact rather than lost.
+
+    Attribution for anything that predates real attribution (migrated notes,
+    and any log note written before the `by` column existed) falls back to
+    that CONTACT'S OWNER, not a generic placeholder — Ethan's call: this is
+    real historical data with very few entries, all written by (or in front
+    of) the board's own owner before the switcher saw meaningful use, so it's
+    not an auditing gap worth flagging — just unattractive to a non-technical
+    viewer as "unknown". Re-running this also fixes any row already stamped
+    with the earlier "(imported from Notes field)" placeholder.
+
+    Idempotent: only touches contacts whose `notes` is still non-empty
+    (clearing it after migrating) and interactions whose `by` is still blank
+    or the old placeholder, so this is a no-op on every boot after the first
+    full pass. The `notes` column itself is NOT dropped (this project never
+    drops columns) — it's just permanently blank going forward.
+    """
+    db = next(get_db())
+    try:
+        rows = db.query(Contact).filter(Contact.notes.isnot(None), Contact.notes != "").all()
+        for c in rows:
+            c.interactions.append(
+                Interaction(
+                    date=c.created_at.date().isoformat() if c.created_at else today_iso(),
+                    note=c.notes,
+                    by=c.owner.name if c.owner else "",
+                )
+            )
+            c.notes = ""
+        if rows:
+            db.commit()
+
+        unattributed = [
+            i for i in db.query(Interaction).all()
+            if not (i.by or "").strip() or i.by == "(imported from Notes field)"
+        ]
+        for i in unattributed:
+            if i.contact and i.contact.owner:
+                i.by = i.contact.owner.name
+        if unattributed:
+            db.commit()
     finally:
         db.close()
 
@@ -529,6 +578,7 @@ def list_contacts(
 def create_contact(
     payload: ContactIn,
     user: User = Depends(get_current_user),
+    actor_name: str | None = Depends(m365.get_actor_name),
     db: Session = Depends(get_db),
 ) -> dict:
     phones_json, primary = _clean_phones_payload(payload)
@@ -540,12 +590,15 @@ def create_contact(
         email=payload.email,
         phone=primary,
         phones_json=phones_json,
+        address=payload.address,
         category=payload.category,
         category_label=payload.categoryLabel,
         next_action=payload.nextAction,
         next_due=payload.nextDue,
-        notes=payload.notes,
     )
+    note = payload.note.strip()
+    if note:
+        contact.interactions.append(Interaction(date=today_iso(), note=note, by=actor_name or user.name))
     db.add(contact)
     db.commit()
     db.refresh(contact)
@@ -577,11 +630,11 @@ def update_contact(
     contact.email = payload.email
     contact.phone = primary
     contact.phones_json = phones_json
+    contact.address = payload.address
     contact.category = payload.category
     contact.category_label = payload.categoryLabel
     contact.next_action = payload.nextAction
     contact.next_due = payload.nextDue
-    contact.notes = payload.notes
     db.commit()
     db.refresh(contact)
     telemetry.log_event(user.id, "crm", "contact_updated")
@@ -605,11 +658,12 @@ def log_touch(
     contact_id: str,
     payload: LogIn,
     user: User = Depends(get_current_user),
+    actor_name: str | None = Depends(m365.get_actor_name),
     db: Session = Depends(get_db),
 ) -> dict:
     contact = _get_or_404(db, user, contact_id)
     contact.interactions.append(
-        Interaction(date=payload.date or today_iso(), note=payload.note)
+        Interaction(date=payload.date or today_iso(), note=payload.note, by=actor_name or user.name)
     )
     db.commit()
     db.refresh(contact)
@@ -617,32 +671,79 @@ def log_touch(
     return serialize(contact)
 
 
+def _get_interaction_or_404(contact: Contact, interaction_id: str) -> Interaction:
+    interaction = next(
+        (i for i in contact.interactions if i.id == interaction_id and not i.deleted), None
+    )
+    if interaction is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return interaction
+
+
+@app.put("/api/contacts/{contact_id}/log/{interaction_id}")
+def edit_log(
+    contact_id: str,
+    interaction_id: str,
+    payload: LogEditIn,
+    user: User = Depends(get_current_user),
+    actor_name: str | None = Depends(m365.get_actor_name),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Edit a note's text — e.g. fixing a typo shouldn't require deleting the
+    original and writing a whole new one. Stamps who made the edit; the
+    original author (`by`) is left alone."""
+    contact = _get_or_404(db, user, contact_id)
+    interaction = _get_interaction_or_404(contact, interaction_id)
+    note = payload.note.strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="Note is required")
+    interaction.note = note
+    interaction.edited_by = actor_name or user.name
+    interaction.edited_at = datetime.utcnow()
+    db.commit()
+    db.refresh(contact)
+    telemetry.log_event(user.id, "crm", "note_edited")
+    return serialize(contact)
+
+
+@app.delete("/api/contacts/{contact_id}/log/{interaction_id}")
+def delete_log(
+    contact_id: str,
+    interaction_id: str,
+    user: User = Depends(get_current_user),
+    actor_name: str | None = Depends(m365.get_actor_name),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Soft-delete a note — it moves to `deletedLog` rather than vanishing, so
+    there's an audit trail of who removed what."""
+    contact = _get_or_404(db, user, contact_id)
+    interaction = _get_interaction_or_404(contact, interaction_id)
+    interaction.deleted = True
+    interaction.deleted_by = actor_name or user.name
+    interaction.deleted_at = datetime.utcnow()
+    db.commit()
+    db.refresh(contact)
+    telemetry.log_event(user.id, "crm", "note_deleted")
+    return serialize(contact)
+
+
 @app.post("/api/contacts/{contact_id}/complete")
 def complete_action(
     contact_id: str,
     user: User = Depends(get_current_user),
+    actor_name: str | None = Depends(m365.get_actor_name),
     db: Session = Depends(get_db),
 ) -> dict:
     """Log the current next action as done and clear it."""
     contact = _get_or_404(db, user, contact_id)
     done_note = "Done: " + (contact.next_action or "follow-up")
-    contact.interactions.append(Interaction(date=today_iso(), note=done_note))
+    contact.interactions.append(Interaction(date=today_iso(), note=done_note, by=actor_name or user.name))
     contact.next_action = ""
     contact.next_due = ""
     db.commit()
     db.refresh(contact)
     telemetry.log_event(user.id, "crm", "action_completed")
     return serialize(contact)
-
-
-@app.post("/api/reset")
-def reset(
-    user: User = Depends(get_current_user), db: Session = Depends(get_db)
-) -> dict:
-    """Restore the demo contact set for the active user only."""
-    load_seed(db, user)
-    count = db.query(Contact).filter(Contact.user_id == user.id).count()
-    return {"status": "reset", "count": count}
 
 
 @app.post("/api/contacts/scan-card")

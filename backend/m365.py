@@ -104,6 +104,31 @@ def get_session_user(
     return user
 
 
+def get_actor_name(
+    starbot_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    db: Session = Depends(get_db),
+) -> str | None:
+    """The name of the person ACTUALLY signed in, ignoring X-User-Id (which
+    only changes which profile's board is being viewed/edited — the CRM
+    profile switcher). Used for log-note attribution (personal CRM contacts
+    AND shared Accounts) so that switching to view someone else's board
+    doesn't attribute your notes to them — a real gap: the API only ever
+    reaches your own board's rows, but the switcher meant any signed-in
+    employee could edit someone ELSE's board and have it silently logged
+    under that other person's name instead of their own, defeating the point
+    of an audit trail. Returns None when there's no browser session to read —
+    local dev without M365, or the MCP connector's bearer-token path — so
+    callers fall back to the X-User-Id/Bearer-resolved `user` from
+    get_current_user in that case, which is already correct there (no
+    switcher concept over that path)."""
+    if not M365_LOGIN_ENABLED or not starbot_session:
+        return None
+    try:
+        return get_session_user(starbot_session, db).name
+    except HTTPException:
+        return None
+
+
 def get_graph_token(user: User, db: Session) -> str:
     """Silently acquire a delegated Graph access token from the user's stored
     MSAL cache (refreshing if needed). Raises 401 when re-sign-in is required."""

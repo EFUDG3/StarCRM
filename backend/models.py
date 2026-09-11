@@ -109,6 +109,7 @@ class Contact(Base):
     email = Column(String, default="")
     phone = Column(String, default="")       # primary number (first of phones_json); kept for the table + back-compat
     phones_json = Column(Text, default="[]")  # JSON list of {type, number} — cell/work/home/other
+    address = Column(Text, default="")       # optional; not shown in the list table, only the detail view
     category = Column(String, default="bd")  # bd|gc|vendor|property|client|sub|designer|insurance|healthcare|other
     category_label = Column(String, nullable=True)  # free-text label when category == "other"
     next_action = Column(Text, default="")
@@ -128,12 +129,26 @@ class Contact(Base):
 
 
 class Interaction(Base):
+    """A dated log entry on a personal-CRM contact. Records WHO logged/edited/
+    deleted it (mirrors AccountInteraction's `by`) since a signed-in user can
+    view and edit another profile's board via the switcher — the note author
+    is not necessarily the contact's owner. Deletes are soft (`deleted`
+    flag): a deleted note moves to the contact's "Deleted notes" section
+    instead of disappearing, for auditing."""
+
     __tablename__ = "interactions"
 
     id = Column(String, primary_key=True, default=_interaction_id)
     contact_id = Column(String, ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False)
     date = Column(String, nullable=False)  # ISO date string
     note = Column(Text, nullable=False)
+    by = Column(String, default="")        # name of the user who logged it
+    created_at = Column(DateTime, server_default=func.now())
+    edited_by = Column(String, nullable=True)
+    edited_at = Column(DateTime, nullable=True)
+    deleted = Column(Boolean, nullable=False, default=False)
+    deleted_by = Column(String, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     contact = relationship("Contact", back_populates="interactions")
 

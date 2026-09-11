@@ -52,10 +52,17 @@ export const logTouch = (id, note) =>
     body: JSON.stringify({ note }),
   });
 
+export const editLogNote = (contactId, interactionId, note) =>
+  request(`/api/contacts/${contactId}/log/${interactionId}`, {
+    method: "PUT",
+    body: JSON.stringify({ note }),
+  });
+
+export const deleteLogNote = (contactId, interactionId) =>
+  request(`/api/contacts/${contactId}/log/${interactionId}`, { method: "DELETE" });
+
 export const completeAction = (id) =>
   request(`/api/contacts/${id}/complete`, { method: "POST" });
-
-export const resetData = () => request("/api/reset", { method: "POST" });
 
 // Upload a business-card photo; returns { name, company, role, email, phone,
 // cardImage } where cardImage is a compact JPEG data URL to save with the contact.

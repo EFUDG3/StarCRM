@@ -131,6 +131,140 @@ This file is the single source of truth for picking the project back up. Read it
 > - **Deferred until:** phase-2 digest is live (target 2026-08-25 today). Then meetings is
 >   next in line.
 
+> **CRM OVERHAUL (2026-09-11, same day, after the UI pass below) - worked Ethan's backlog of CRM
+> annoyances top-to-bottom, one item at a time with review in between. Login scoping, an address
+> field, several real bugs, and a full log-note auditing system (attribution + edit + soft-delete)
+> that also absorbed and retired the old unaudited `notes` field. Built + reviewed by Ethan in
+> local dev, which points at the SAME live Azure Postgres as prod (see Database Notion page) - so
+> the data-side migration below has ALREADY run against real prod data. Not yet deployed to the
+> Container App itself; that's the next step, Ethan running it himself as usual.**
+> - **Login now always defaults to the signed-in user's OWN profile** (`App.jsx` init effect).
+>   The bug: `api.getCurrentUser()` reads a `localStorage` value that persists indefinitely across
+>   reloads/sign-ins, and the old logic only overrode it when that cached profile no longer
+>   existed at all - otherwise a stale "last viewed" profile (e.g. from once switching to check
+>   Bob's board) would keep showing on every future login on that device, with no visual cue you
+>   weren't looking at your own data. Now checks `me.userId` (the actual M365-linked profile)
+>   FIRST on every fresh load. The profile switcher itself is untouched - it just doesn't "stick"
+>   as the default anymore. Confirmed via `main.py:300-303` that the switcher itself (any signed-in
+>   employee can view another profile's board) is intentional design, not something to lock down.
+> - **Contact address field**, end-to-end: `Contact.address` (additive column), `ContactIn`,
+>   `serialize()`, both card-scan and manual entry. Deliberately **left off the list table**
+>   (Name/Company/Role/Email/Phone/Next action/Category unchanged) - shown only on the detail
+>   view, per Ethan's call that the table shouldn't grow another column for something most rows
+>   won't need to compare at a glance. `cards.py`'s OCR prompt now asks Claude for a 6th field.
+> - **Fixed: scanning a card while the blank "Add contact" form was already open did nothing
+>   visible.** Root cause - `ContactForm` had no React `key`, so completing a scan updated the
+>   `editing` prop but React reused the same mounted instance, whose internal form state is only
+>   seeded from `initial` on first mount. Fixed with a `newContactNonce` counter bumped on both
+>   "Add contact" and a completed scan, used as the form's `key` - existing-contact edits already
+>   keyed correctly off their own `id`. Side effect (matches what Ethan wanted): clicking "Add
+>   contact" again on a dirty blank form now also resets it, not just the scan path.
+> - **Duplicate-name detection, framed as a nudge, not a wall.** Exact match (trimmed,
+>   case-insensitive) against the user's already-loaded contacts, excluding the contact being
+>   edited - checked live on every keystroke, no debounce needed and no API call, since an exact
+>   match can't false-positive on a partially-typed name. First pass greyed out and disabled
+>   "Save contact" on a match; **reverted after Ethan's pushback** ("plenty of people share a
+>   name... refusing to save would be a huge disappointment in prod") to a "Save anyway" label
+>   swap instead - same warning copy, button stays clickable the whole time.
+> - **Phone types expanded**: `fax` and `tollfree` added alongside cell/work/home/other, on both
+>   the OCR prompt (`cards.py`, with label hints - F/fax, TF/toll-free) and the manual dropdown.
+>   Frontend gained a shared `PHONE_TYPES` label map (`App.jsx`) used by both the `<select>` and
+>   the detail-view display, replacing a naive `.charAt(0).toUpperCase()` that would have rendered
+>   "tollfree" as "Tollfree" instead of "Toll-free".
+> - **Removed dead dev-only surface, all the way through the stack**: the "Reset data" button,
+>   `api.resetData()`, the `POST /api/reset` route, `load_seed()`, and the Bob-creation-and-seed
+>   block inside `_seed_on_first_run()`. Since that block was the only caller of `SEED_CONTACTS`,
+>   **deleted the now-fully-orphaned `backend/seed.py` outright** (186 lines) rather than leave it
+>   dangling - confirmed nothing else imports from it first. `_seed_on_first_run()`'s docstring
+>   corrected too (it still claimed to seed a demo profile). None of this touches Bob's real,
+>   already-existing prod data - the `count() == 0` guard hasn't fired since long before there
+>   were 15 real users, so this was dead code, not a live data path.
+> - **Card-scan camera UX, per Ethan's two rounds of feedback**: added a hint below the camera
+>   frame ("Keep the card's text upright in the frame, scanner has a hard time with sideways
+>   text") - short version, after an initial draft he said "said too much." Then **removed the
+>   dashed landscape guide-box overlay entirely** - his reasoning: it implied the card must fit a
+>   fixed box, which a non-technical user can't intuit is optional, and a bigger/closer card in
+>   frame reads better for OCR than one constrained to a fixed aspect ratio.
+> - **Fixed: "sort by newest" silently behaved like "sort by name" for anything added the same
+>   day.** `serialize()` was truncating `created_at` to date-only (`.date().isoformat()`) before
+>   the comparator ever saw it, so same-day contacts had no time-of-day to compare and fell
+>   through to the existing name tiebreaker. Added `createdAt` (full timestamp) alongside the
+>   existing date-only `created` (left alone - still used for the "Added [date]" display) and
+>   pointed the sort comparator at it.
+> - **Log-note auditing system** - the big one, built in response to "people have access to other
+>   people's CRMs, it's important to log who made what note":
+>   - `Interaction` gained `by`, `edited_by`/`edited_at`, `deleted`/`deleted_by`/`deleted_at`,
+>     `created_at` (additive). Mirrors `AccountInteraction.by`, which already did this for shared
+>     Accounts - this closes the same gap for personal-CRM contacts.
+>   - New `PUT`/`DELETE /api/contacts/{id}/log/{interaction_id}` - edit a note's text (stamps
+>     `edited_by`/`edited_at`, leaves the original author alone) and **soft-delete** (flips
+>     `deleted`, stamps who/when - never a hard delete). `serialize()` now returns `log` (active)
+>     and a separate `deletedLog`.
+>   - Frontend: each note shows "Logged by X · edited by Y", hover-reveal edit/delete icons
+>     (inline edit, no page nav), delete asks for confirmation, and a **"Deleted notes"** section
+>     that only renders when non-empty (struck-through text, who logged it, who deleted it).
+>   - **REAL BUG CAUGHT MID-BUILD, Ethan's catch**: attribution was using `get_current_user()`,
+>     which resolves to whichever profile is being VIEWED (honors `X-User-Id`, i.e. the switcher),
+>     not who's actually signed in. Switch to view Bob's board, log a note, and it would have said
+>     "Logged by Bob Bendixen" even though Ethan wrote it - silently defeating the entire point of
+>     the feature. Fixed with `m365.get_actor_name()` (a new dependency, reads the session cookie
+>     directly, ignores `X-User-Id` entirely, `None` when there's no browser session to read -
+>     local dev without M365, or the MCP connector's bearer-token path). Wired into `log_touch`,
+>     `edit_log`, `delete_log`, `complete_action`, `create_contact` as `by=actor_name or user.name`.
+>     Placed in `m365.py` (not `main.py`) specifically so `accounts.py` could share it without a
+>     circular import.
+>   - **Checked accounts.py for the same bug - it does NOT have it.** Every route there resolves
+>     `user` via `Depends(m365.get_session_user)` directly, never `get_current_user()` - Accounts
+>     is fully shared with no per-user "viewing as" concept at all, so there was never a switcher
+>     to bypass. Confirmed across all six routes before saying so; almost "fixed" something that
+>     wasn't broken.
+> - **Retired the freeform `notes` field entirely - it was a silent, unaudited bypass of the
+>   system above.** Anyone could type anything into `notes` via the edit form with zero
+>   attribution, timestamp, or history, completely sidestepping log-note auditing. Ethan's
+>   diagnosis mid-session, and the fix:
+>   - `ContactIn.notes` removed; `ContactIn.note` added - **honored only on `create_contact`**
+>     (seeds the contact's first log entry, attributed via `get_actor_name`), silently ignored on
+>     update. This closes the bypass server-side, not just in the UI - a direct API call can't
+>     write unaudited text into a contact anymore either.
+>   - `update_contact` no longer touches notes at all. `serialize()` no longer returns `notes`.
+>   - New `_migrate_notes_to_log()`, run once at startup (`lifespan` handler): any contact with
+>     existing `notes` content gets it copied into a real log-note Interaction, then `notes` is
+>     cleared. Idempotent - only touches rows where `notes` is still non-empty, no-op after the
+>     first full pass. **The `notes` column is NOT dropped** (this project never drops columns) -
+>     just permanently blank going forward.
+>   - **Attribution on migrated/legacy notes iterated once**: first pass used a generic
+>     `"(imported from Notes field)"` placeholder; Ethan asked for it to say the contact's actual
+>     owner's name instead ("there were not many logged notes and all of it was done in front of
+>     me or by me... this would not be an auditing issue and would look better for a non-technical
+>     user"). Now attributes to `contact.owner.name`. Also backfills ANY pre-existing log note
+>     whose `by` is still blank (predates the `by` column entirely) the same way, and self-heals
+>     any row already stamped with the old placeholder text - so re-running it after Ethan's first
+>     local test cleaned those up too.
+>   - Frontend: Notes textarea gone from the contact form. Replaced with an optional **"Log a
+>     note"** field shown ONLY when creating a NEW contact (`!form.id`) - hidden on edit, since
+>     further notes go through the detail view's log-note UI, not the edit form. Bare unstyled
+>     notes paragraph removed from the detail view (nothing left to render there). Contact-list
+>     search now matches log-note text instead of the old `notes` field.
+>   - **This also answered the next backlog item for free** ("able to log on card entry") - a
+>     scanned card lands on this same form, so the optional "Log a note" field covers it.
+> - **Fixed: the CRM tab's loading state blanked the ENTIRE page**, header and tab bar included -
+>   the only tab built this way, because the CRM board is inlined directly in the top-level
+>   component rather than a separate child component like Email/Mileage/Tasks/Accounts/Projects,
+>   each of which already scopes its own "Loading…" to its own content area. Removed the early
+>   `if (!contacts && view === "board") return <fullscreen loading>` and moved the loading state
+>   inside the board's own content block, matching Email.jsx's existing `py-16 text-center`
+>   pattern - header/tabs/profile switcher now stay visible and interactive while contacts load.
+> - **Deploy plan, agreed with Ethan:** `_migrate_notes_to_log()` stays in the codebase until the
+>   Azure Container App deploy is confirmed clean (it's idempotent and already a no-op against
+>   local/prod data, so leaving it costs nothing) - remove it and its `lifespan()` call ONLY after
+>   that verification, not before. `get_actor_name()` is NOT a one-time migration and is not
+>   scheduled for removal.
+> - **`README.md` flagged, not touched**: it still describes the original Cloud-Run-vs-GCP-and-Neon,
+>   no-auth, X-User-Id-only proof-of-concept architecture, including a documented `/api/reset`
+>   route that no longer exists as of this session. Significantly stale relative to the real
+>   current stack (Azure Container Apps + Azure Postgres + M365 auth) - out of scope for today,
+>   worth a dedicated pass separately rather than folding into this already-large change.
+
 > **UI ACCESSIBILITY PASS (2026-09-11) - larger text/touch-targets, darker muted grays, wider
 > content area, button hover feedback, looser line-height. Frontend-only, no backend/schema
 > changes. Committed as `90e3ba4`, built + visually reviewed by Ethan in local dev across this

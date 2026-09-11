@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Search, Phone, Mail, X, Check, Clock, Pencil, Trash2, ChevronLeft, RotateCcw,
-  UserCircle, ChevronDown, UserPlus, Camera, Sparkles, LayoutGrid, ListTodo, Car, Building2, HardHat, Inbox,
+  UserCircle, ChevronDown, UserPlus, Camera, Sparkles, LayoutGrid, ListTodo, Car, Building2, HardHat, Inbox, MapPin, AlertTriangle,
 } from "lucide-react";
 import * as api from "./api.js";
 import StarbotChat from "./Chat.jsx";
@@ -34,6 +34,12 @@ const CATEGORIES = {
   other: { label: "Other", color: "#6B7280" },        // neutral gray
 };
 
+// Phone types a business card actually prints — mirrors backend/cards.py's
+// _PHONE_TYPES so the OCR scanner and the manual dropdown agree on the same set.
+const PHONE_TYPES = {
+  cell: "Cell", work: "Work", home: "Home", fax: "Fax", tollfree: "Toll-free", other: "Other",
+};
+
 // Display label for a contact's category — the custom text when it's "Other".
 const catLabel = (c) =>
   c.category === "other" && c.categoryLabel
@@ -54,8 +60,8 @@ const fmtDate = (iso) => {
 };
 
 const blank = {
-  name: "", company: "", role: "", email: "", phone: "", phones: [],
-  category: "bd", categoryLabel: "", nextAction: "", nextDue: "", notes: "", log: [],
+  name: "", company: "", role: "", email: "", phone: "", phones: [], address: "",
+  category: "bd", categoryLabel: "", nextAction: "", nextDue: "", note: "", log: [],
 };
 
 export default function StarCRM() {
@@ -83,10 +89,19 @@ export default function StarCRM() {
   const [selectedId, setSelectedId] = useState(null);
   const [editing, setEditing] = useState(null); // contact object being edited, or "new"
   const [touchText, setTouchText] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
+  // Bumped every time a NEW (unsaved) contact editing session starts — either
+  // "Add contact" or a completed scan. Used as ContactForm's key so React
+  // remounts it instead of reusing the same instance: ContactForm seeds its
+  // local state from `initial` only once on mount, so without a key change a
+  // scan completing while the blank Add-contact form is already open would
+  // update the `editing` prop but leave the visible form exactly as it was.
+  const [newContactNonce, setNewContactNonce] = useState(0);
   // Up-next rail collapse state, remembered across visits.
   const [upNextOpen, setUpNextOpen] = useState(() => localStorage.getItem("upNextOpen") !== "0");
   useEffect(() => { localStorage.setItem("upNextOpen", upNextOpen ? "1" : "0"); }, [upNextOpen]);
@@ -107,17 +122,20 @@ export default function StarCRM() {
   const authed = me != null && (me.signedIn || !me.configured);
 
   // Once signed in: pick the active profile and load their board. Default is
-  // the signed-in user's OWN profile (not the first row, which was Bob).
+  // ALWAYS the signed-in user's own profile, never whichever profile was last
+  // viewed — `api.getCurrentUser()` reads a localStorage value that persists
+  // indefinitely across reloads and sign-ins, so without this a fresh login
+  // could silently land on someone else's board from a prior session/switch.
+  // The profile switcher can still change it for the rest of this session.
   useEffect(() => {
     if (!authed) return;
     (async () => {
       try {
         const us = await api.listUsers();
-        let id = api.getCurrentUser();
-        if (!us.find((u) => u.id === id)) {
-          id = (me.userId && us.find((u) => u.id === me.userId)) ? me.userId : (us[0]?.id || null);
-          api.setCurrentUser(id);
-        }
+        let id = (me.userId && us.find((u) => u.id === me.userId))
+          ? me.userId
+          : (us.find((u) => u.id === api.getCurrentUser())?.id || us[0]?.id || null);
+        api.setCurrentUser(id);
         setUsers(us);
         setUserId(id);
         if (id) await refresh();
@@ -214,12 +232,6 @@ export default function StarCRM() {
     }
   };
 
-  const resetData = async () => {
-    if (!window.confirm("Reset to the original seeded contacts? Your changes will be lost.")) return;
-    await mutate(() => api.resetData());
-    setSelectedId(null);
-  };
-
   const selected = contacts?.find((c) => c.id === selectedId) || null;
 
   const filtered = useMemo(() => {
@@ -227,11 +239,16 @@ export default function StarCRM() {
     const q = query.trim().toLowerCase();
     return contacts
       .filter((c) => (filter === "all" ? true : c.category === filter))
-      .filter((c) => !q || [c.name, c.company, c.role, c.notes].join(" ").toLowerCase().includes(q))
+      .filter((c) => !q || [c.name, c.company, c.role, ...(c.log || []).map((l) => l.note)].join(" ").toLowerCase().includes(q))
       .sort((a, b) => {
         if (sortBy === "created") {
-          // Newest first by creation date; ties fall back to name.
-          const ca = a.created || "", cb = b.created || "";
+          // Newest first by the precise creation timestamp (down to the
+          // second), not just the day — otherwise every contact added on the
+          // same day ties and falls back to alphabetical, which reads as
+          // "sort by newest" silently behaving like "sort by name" whenever
+          // several cards get scanned in one sitting. `created` (date-only)
+          // is a fallback for any row that somehow lacks `createdAt`.
+          const ca = a.createdAt || a.created || "", cb = b.createdAt || b.created || "";
           if (ca !== cb) return ca < cb ? 1 : -1;
           return a.name.localeCompare(b.name);
         }
@@ -279,6 +296,19 @@ export default function StarCRM() {
     await mutate(() => api.completeAction(id));
   };
 
+  const startEditNote = (l) => { setEditingNoteId(l.id); setEditingNoteText(l.note); };
+  const cancelEditNote = () => { setEditingNoteId(null); setEditingNoteText(""); };
+  const saveEditNote = async (contactId) => {
+    if (!editingNoteText.trim()) return;
+    await mutate(() => api.editLogNote(contactId, editingNoteId, editingNoteText.trim()));
+    setEditingNoteId(null);
+    setEditingNoteText("");
+  };
+  const deleteNote = async (contactId, interactionId) => {
+    if (!window.confirm("Delete this note? It moves to Deleted notes below instead of disappearing.")) return;
+    await mutate(() => api.deleteLogNote(contactId, interactionId));
+  };
+
   // Scan a business card → extract fields → open the form prefilled for review.
   // Shared by the webcam capture (a Blob) and the file-picker fallback (a File).
   const runScan = async (file) => {
@@ -287,13 +317,14 @@ export default function StarCRM() {
     setScanning(true);
     try {
       const f = await api.scanCard(file);
-      const gotSomething = ["name", "company", "role", "email", "phone"]
+      const gotSomething = ["name", "company", "role", "email", "phone", "address"]
         .some((k) => (f[k] || "").trim());
       if (!gotSomething) {
         setScanError("Couldn't read any details off that card. Try a sharper, well-lit photo, or add the contact manually.");
         return;
       }
       setSelectedId(null);
+      setNewContactNonce((n) => n + 1);
       setEditing({
         ...blank,
         name: f.name || "",
@@ -304,6 +335,7 @@ export default function StarCRM() {
         // Claude classifies the card and reads typed phone numbers; prefill both
         // (validated against known categories, else fall back to Business Dev).
         phones: (f.phones && f.phones.length) ? f.phones : (f.phone ? [{ type: "work", number: f.phone }] : []),
+        address: f.address || "",
         category: (f.category && CATEGORIES[f.category]) ? f.category : "bd",
         cardImage: f.cardImage || null,
       });
@@ -384,14 +416,6 @@ export default function StarCRM() {
     );
   }
 
-  if (!contacts && view === "board") {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: PAGE_BG }}>
-        <div className="font-mono text-sm tracking-widest uppercase" style={{ color: SEA }}>Loading contacts…</div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen" style={{ background: PAGE_BG, color: INK }}>
       {/* All tabs share one container width so the page boundaries don't jump
@@ -416,9 +440,6 @@ export default function StarCRM() {
                 <span className="font-mono text-xs" style={{ color: saveState === "error" ? TIDE : SEA }}>
                   {saveState === "saving" ? "saving…" : saveState === "saved" ? "saved ✓" : saveState === "error" ? "save failed" : ""}
                 </span>
-                <button onClick={resetData} title="Reset data" className="p-3 rounded hover:bg-white" style={{ color: INK }}>
-                  <RotateCcw size={16} />
-                </button>
                 <input ref={cardInputRef} type="file" accept="image/*" onChange={handleScanFile} className="hidden" />
                 <button
                   onClick={() => { setScanError(""); setCameraOpen(true); }}
@@ -430,7 +451,7 @@ export default function StarCRM() {
                   <Camera size={16} /> {scanning ? "Reading…" : "Scan card"}
                 </button>
                 <button
-                  onClick={() => setEditing({ ...blank })}
+                  onClick={() => { setNewContactNonce((n) => n + 1); setEditing({ ...blank }); }}
                   className="flex items-center gap-1.5 px-3 py-2 rounded text-white text-sm font-medium"
                   style={{ background: INK }}
                 >
@@ -505,7 +526,9 @@ export default function StarCRM() {
           />
         )}
 
-        {view === "board" && <>
+        {view === "board" && (!contacts ? (
+          <div className="py-16 text-center font-mono text-sm tracking-widest uppercase" style={{ color: SEA }}>Loading contacts…</div>
+        ) : <>
         {/* Scan error banner */}
         {scanError && (
           <div className="mb-4 rounded p-3 text-sm flex items-start justify-between gap-3" style={{ background: "#FBEAE8", color: TIDE, border: `1px solid ${TIDE}` }}>
@@ -552,7 +575,15 @@ export default function StarCRM() {
         )}
 
         {/* Edit / Add form */}
-        {editing && <ContactForm initial={editing} onCancel={() => setEditing(null)} onSave={saveEdit} />}
+        {editing && (
+          <ContactForm
+            key={editing.id || `new-${newContactNonce}`}
+            initial={editing}
+            contacts={contacts}
+            onCancel={() => setEditing(null)}
+            onSave={saveEdit}
+          />
+        )}
 
         {/* Detail view */}
         {selected && !editing && (
@@ -572,10 +603,16 @@ export default function StarCRM() {
                   {(selected.phones || []).map((p, i) => (
                     <span key={i} className="flex items-center gap-1 text-sm">
                       <Phone size={14} style={{ color: SEA }} />{p.number}
-                      {p.type ? <span className="text-xs" style={{ color: "#5f6e74" }}>· {p.type.charAt(0).toUpperCase() + p.type.slice(1)}</span> : null}
+                      {p.type ? <span className="text-xs" style={{ color: "#5f6e74" }}>· {PHONE_TYPES[p.type] || (p.type.charAt(0).toUpperCase() + p.type.slice(1))}</span> : null}
                     </span>
                   ))}
                 </div>
+                {selected.address && (
+                  <div className="flex items-start gap-1.5 text-sm mt-2" style={{ color: "#343e41" }}>
+                    <MapPin size={14} className="mt-0.5 shrink-0" style={{ color: SEA }} />
+                    <span className="whitespace-pre-line">{selected.address}</span>
+                  </div>
+                )}
               </div>
               <div className="flex gap-2">
                 <button onClick={() => setEditing({ ...selected })} className="p-3 rounded hover:bg-stone-100"><Pencil size={16} /></button>
@@ -595,8 +632,6 @@ export default function StarCRM() {
               </div>
             )}
 
-            {selected.notes && <p className="mt-4 text-sm leading-relaxed whitespace-pre-wrap">{selected.notes}</p>}
-
             <div className="mt-5">
               <div className="font-mono text-xs uppercase tracking-widest mb-2" style={{ color: INK }}>Log note</div>
               <div className="flex gap-2">
@@ -611,14 +646,57 @@ export default function StarCRM() {
                 <button onClick={() => logTouch(selected.id)} className="px-3 py-2 rounded text-white text-sm font-medium" style={{ background: INK }}>Log</button>
               </div>
               <ul className="mt-3 space-y-2">
-                {selected.log.map((l, i) => (
-                  <li key={i} className="flex gap-3 text-sm">
+                {selected.log.map((l) => (
+                  <li key={l.id} className="group flex gap-3 text-sm items-start">
                     <span className="font-mono text-xs pt-0.5 shrink-0" style={{ color: SEA }}>{l.date}</span>
-                    <span>{l.note}</span>
+                    {editingNoteId === l.id ? (
+                      <div className="flex-1 flex gap-2">
+                        <input
+                          autoFocus
+                          value={editingNoteText}
+                          onChange={(e) => setEditingNoteText(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && saveEditNote(selected.id)}
+                          className="flex-1 border rounded px-2 py-1 text-sm bg-white"
+                          style={{ borderColor: "#cdd6d4" }}
+                        />
+                        <button onClick={() => saveEditNote(selected.id)} className="px-2 rounded text-white text-xs font-medium shrink-0" style={{ background: INK }}>Save</button>
+                        <button onClick={cancelEditNote} className="px-2 rounded text-xs shrink-0" style={{ background: MIST }}>Cancel</button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex-1 min-w-0">
+                          <span>{l.note}</span>
+                          <span className="block font-mono text-[10px] mt-0.5" style={{ color: "#5f6e74" }}>
+                            Logged by {l.by || "unknown"}{l.editedBy ? ` · edited by ${l.editedBy}` : ""}
+                          </span>
+                        </div>
+                        <button onClick={() => startEditNote(l)} className="p-1.5 hover-reveal hover:bg-stone-100 rounded shrink-0" title="Edit note"><Pencil size={12} /></button>
+                        <button onClick={() => deleteNote(selected.id, l.id)} className="p-1.5 hover-reveal hover:bg-stone-100 rounded shrink-0" style={{ color: TIDE }} title="Delete note"><Trash2 size={12} /></button>
+                      </>
+                    )}
                   </li>
                 ))}
                 {selected.log.length === 0 && <li className="text-sm" style={{ color: "#5f6e74" }}>No notes yet. Add the first one above.</li>}
               </ul>
+
+              {selected.deletedLog && selected.deletedLog.length > 0 && (
+                <div className="mt-5">
+                  <div className="font-mono text-xs uppercase tracking-widest mb-2" style={{ color: "#5f6e74" }}>Deleted notes</div>
+                  <ul className="space-y-2">
+                    {selected.deletedLog.map((l) => (
+                      <li key={l.id} className="flex gap-3 text-sm" style={{ color: "#5f6e74" }}>
+                        <span className="font-mono text-xs pt-0.5 shrink-0">{l.date}</span>
+                        <div className="flex-1 min-w-0">
+                          <span className="line-through">{l.note}</span>
+                          <span className="block font-mono text-[10px] mt-0.5">
+                            Logged by {l.by || "unknown"} · deleted by {l.deletedBy || "unknown"}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </section>
         )}
@@ -702,13 +780,13 @@ export default function StarCRM() {
             </div>
           </>
         )}
-        </>}
+        </>)}
       </div>
     </div>
   );
 }
 
-function ContactForm({ initial, onCancel, onSave }) {
+function ContactForm({ initial, contacts, onCancel, onSave }) {
   // Always keep at least one phone row so there's a field to type into (empty
   // rows are dropped server-side on save).
   const [form, setForm] = useState(() => ({
@@ -716,8 +794,22 @@ function ContactForm({ initial, onCancel, onSave }) {
     phones: (initial.phones && initial.phones.length) ? initial.phones : [{ type: "cell", number: "" }],
   }));
 
+  // Exact-match (trimmed, case-insensitive) duplicate check against this
+  // user's existing contacts, excluding the contact being edited. Runs on
+  // every keystroke off the already-loaded contacts list (no API call), so
+  // there's no need to debounce — and an exact-match check naturally avoids
+  // false positives while a name is only partway typed, since a few
+  // characters can't equal someone else's full name.
+  const trimmedName = form.name.trim().toLowerCase();
+  const duplicate = trimmedName
+    ? (contacts || []).find((c) => c.id !== form.id && c.name.trim().toLowerCase() === trimmedName)
+    : null;
+
   const [busy, setBusy] = useState(false);
   const save = async () => {
+    // A name match is a heads-up, not a block — plenty of real contacts share
+    // a name (e.g. father/son), and refusing to save would be a much worse
+    // outcome than an occasional intentional duplicate.
     if (busy || !form.name.trim()) return;
       setBusy(true);
     try {
@@ -755,7 +847,12 @@ function ContactForm({ initial, onCancel, onSave }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
           <span className={cap} style={{ color: SEA }}>Name *</span>
-          <input className={field} style={bc} placeholder="Jane Doe" value={form.name} onChange={set("name")} />
+          <input className={field} style={duplicate ? { borderColor: TIDE } : bc} placeholder="Jane Doe" value={form.name} onChange={set("name")} />
+          {duplicate && (
+            <span className="flex items-center gap-1 text-xs mt-1" style={{ color: TIDE }}>
+              <AlertTriangle size={12} /> Already in your contacts{duplicate.company ? ` · ${duplicate.company}` : ""} — different person? Just hit Save anyway.
+            </span>
+          )}
         </label>
         <label className="block">
           <span className={cap} style={{ color: SEA }}>Company</span>
@@ -787,10 +884,7 @@ function ContactForm({ initial, onCancel, onSave }) {
             {form.phones.map((p, i) => (
               <div key={i} className="flex gap-2">
                 <select className="border rounded px-2 py-2 text-sm bg-white shrink-0" style={bc} value={p.type || "cell"} onChange={setPhoneField(i, "type")}>
-                  <option value="cell">Cell</option>
-                  <option value="work">Work</option>
-                  <option value="home">Home</option>
-                  <option value="other">Other</option>
+                  {Object.entries(PHONE_TYPES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
                 </select>
                 <input className={field} style={bc} maxLength={40} autoComplete="off" placeholder="(619) 555-0100" value={p.number} onChange={setPhoneField(i, "number")} />
                 <button type="button" onClick={() => removePhone(i)} className="px-2 rounded hover:bg-stone-100 shrink-0" style={{ color: TIDE }} title="Remove"><X size={15} /></button>
@@ -799,6 +893,10 @@ function ContactForm({ initial, onCancel, onSave }) {
             <button type="button" onClick={addPhone} className="text-xs font-medium flex items-center gap-1" style={{ color: SEA }}><Plus size={13} /> Add phone number</button>
           </div>
         </div>
+        <label className="block sm:col-span-2">
+          <span className={cap} style={{ color: SEA }}>Address <span className="normal-case tracking-normal font-sans" style={{ color: "#5f6e74" }}>(optional)</span></span>
+          <textarea className={field + " h-14"} style={bc} placeholder="1234 Main St, Suite 200, San Diego, CA 92120" value={form.address || ""} onChange={set("address")} />
+        </label>
         <label className="block">
           <span className={cap} style={{ color: SEA }}>Next action</span>
           <input className={field} style={bc} placeholder="Call re: estimate" value={form.nextAction} onChange={set("nextAction")} />
@@ -808,12 +906,14 @@ function ContactForm({ initial, onCancel, onSave }) {
           <input className={field} style={bc} type="date" value={form.nextDue} onChange={set("nextDue")} />
         </label>
       </div>
-      <label className="block mt-3">
-        <span className={cap} style={{ color: SEA }}>Notes</span>
-        <textarea className={field + " h-24"} style={bc} placeholder="Context, preferences, history…" value={form.notes} onChange={set("notes")} />
-      </label>
+      {!form.id && (
+        <label className="block mt-3">
+          <span className={cap} style={{ color: SEA }}>Log a note <span className="normal-case tracking-normal font-sans" style={{ color: "#5f6e74" }}>(optional)</span></span>
+          <input className={field} style={bc} placeholder="Met at Surfaces Expo, booth 412…" value={form.note || ""} onChange={set("note")} />
+        </label>
+      )}
       <div className="flex gap-2 mt-4">
-        <button onClick={save} disabled={busy || !form.name.trim()} className="px-4 py-2 rounded text-white text-sm font-medium disabled:opacity-50" style={{ background: INK }}>{busy ? "Saving…" : "Save contact"}</button>
+        <button onClick={save} disabled={busy || !form.name.trim()} title={duplicate ? "A contact with this name already exists — saving will create a second one" : undefined} className="px-4 py-2 rounded text-white text-sm font-medium disabled:opacity-50" style={{ background: INK }}>{busy ? "Saving…" : duplicate ? "Save anyway" : "Save contact"}</button>
         <button onClick={onCancel} className="px-4 py-2 rounded text-sm" style={{ background: MIST }}>Cancel</button>
       </div>
     </section>
@@ -985,11 +1085,12 @@ function CardCamera({ onCapture, onClose, onUseFile }) {
             {preview && (
               <img src={preview} alt="Captured card" className="w-full h-full object-contain" style={{ background: "#000" }} />
             )}
-            {!preview && (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div style={{ width: "82%", aspectRatio: "1.75 / 1", border: "2px dashed rgba(255,255,255,0.9)", borderRadius: 8 }} />
-              </div>
-            )}
+          </div>
+        )}
+
+        {!err && !preview && (
+          <div className="text-center text-xs mt-2" style={{ color: "#5f6e74" }}>
+            Keep the card's text upright in the frame, scanner has a hard time with sideways text.
           </div>
         )}
 
