@@ -296,6 +296,13 @@ export default function StarCRM() {
     await mutate(() => api.completeAction(id));
   };
 
+  const updateNextAction = async (id, nextAction, nextDue) => {
+    const c = contacts.find((x) => x.id === id);
+    if (!c) return;
+    const { cardImage, ...payload } = c;
+    await mutate(() => api.updateContact(id, { ...payload, nextAction, nextDue }));
+  };
+
   const startEditNote = (l) => { setEditingNoteId(l.id); setEditingNoteText(l.note); };
   const cancelEditNote = () => { setEditingNoteId(null); setEditingNoteText(""); };
   const saveEditNote = async (contactId) => {
@@ -620,17 +627,12 @@ export default function StarCRM() {
               </div>
             </div>
 
-            {selected.nextAction && (
-              <div className="mt-4 rounded p-3 flex items-start justify-between gap-3" style={{ background: MIST }}>
-                <div>
-                  <div className="font-mono text-xs uppercase tracking-widest mb-0.5" style={{ color: SEA }}>Next action{selected.nextDue ? " · " + selected.nextDue : ""}</div>
-                  <div className="text-sm font-medium">{selected.nextAction}</div>
-                </div>
-                <button onClick={() => completeAction(selected.id)} className="flex items-center gap-1 px-2.5 py-1.5 rounded text-white text-xs font-medium shrink-0" style={{ background: SEA }}>
-                  <Check size={14} /> Done
-                </button>
-              </div>
-            )}
+            <NextActionEditor
+              key={selected.id}
+              contact={selected}
+              onSave={(nextAction, nextDue) => updateNextAction(selected.id, nextAction, nextDue)}
+              onComplete={() => completeAction(selected.id)}
+            />
 
             <div className="mt-5">
               <div className="font-mono text-xs uppercase tracking-widest mb-2" style={{ color: INK }}>Log note</div>
@@ -786,6 +788,61 @@ export default function StarCRM() {
   );
 }
 
+// Next action + follow-up date, editable directly on the detail view — same
+// reasoning as log notes: acting on a contact (setting/changing what's next)
+// shouldn't require opening the edit form, which is now reserved for factual
+// contact info. `key={contact.id}` on the caller resets local state cleanly
+// when switching to a different contact.
+function NextActionEditor({ contact, onSave, onComplete }) {
+  const [action, setAction] = useState(contact.nextAction || "");
+  const [due, setDue] = useState(contact.nextDue || "");
+  const [busy, setBusy] = useState(false);
+  const dirty = action !== (contact.nextAction || "") || due !== (contact.nextDue || "");
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await onSave(action.trim(), due);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded p-3" style={{ background: MIST }}>
+      <div className="font-mono text-xs uppercase tracking-widest mb-2" style={{ color: SEA }}>Next action</div>
+      <div className="flex flex-wrap gap-2">
+        <input
+          value={action}
+          onChange={(e) => setAction(e.target.value)}
+          placeholder="Call re: estimate"
+          className="flex-1 min-w-[10rem] border rounded px-3 py-2 text-sm bg-white"
+          style={{ borderColor: "#cdd6d4" }}
+        />
+        <input
+          type="date"
+          value={due}
+          onChange={(e) => setDue(e.target.value)}
+          className="border rounded px-3 py-2 text-sm bg-white"
+          style={{ borderColor: "#cdd6d4" }}
+        />
+      </div>
+      <div className="flex gap-2 mt-2">
+        {dirty && (
+          <button onClick={save} disabled={busy} className="px-3 py-1.5 rounded text-white text-xs font-medium disabled:opacity-50" style={{ background: INK }}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+        )}
+        {contact.nextAction && (
+          <button onClick={onComplete} className="flex items-center gap-1 px-2.5 py-1.5 rounded text-white text-xs font-medium" style={{ background: SEA }}>
+            <Check size={14} /> Done
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ContactForm({ initial, contacts, onCancel, onSave }) {
   // Always keep at least one phone row so there's a field to type into (empty
   // rows are dropped server-side on save).
@@ -896,14 +953,6 @@ function ContactForm({ initial, contacts, onCancel, onSave }) {
         <label className="block sm:col-span-2">
           <span className={cap} style={{ color: SEA }}>Address <span className="normal-case tracking-normal font-sans" style={{ color: "#5f6e74" }}>(optional)</span></span>
           <textarea className={field + " h-14"} style={bc} placeholder="1234 Main St, Suite 200, San Diego, CA 92120" value={form.address || ""} onChange={set("address")} />
-        </label>
-        <label className="block">
-          <span className={cap} style={{ color: SEA }}>Next action</span>
-          <input className={field} style={bc} placeholder="Call re: estimate" value={form.nextAction} onChange={set("nextAction")} />
-        </label>
-        <label className="block">
-          <span className={cap} style={{ color: SEA }}>Follow-up date</span>
-          <input className={field} style={bc} type="date" value={form.nextDue} onChange={set("nextDue")} />
         </label>
       </div>
       {!form.id && (
