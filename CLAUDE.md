@@ -134,19 +134,22 @@ This file is the single source of truth for picking the project back up. Read it
 > **DEPLOY FAILURE MODE (2026-09-14) - revisions `starbot--0000046` and `starbot--0000047` are BAD,
 > built from image tag `starbot:next-action`. DO NOT roll back to either. Both crash-loop on
 > startup with `Cannot reach the database at star-crm-pg... connection timeout expired`.**
-> - **Ethan's observed pattern:** deploying while physically at Star Flooring worked; deploying
->   from elsewhere produced both bad revisions. **Until the real root cause is confirmed, deploy
->   only from Star Flooring's network.**
-> - **Worth checking before treating that as the permanent mechanism - flagged, not confirmed:**
->   `az containerapp show -n starbot -g starbot` lists 150+ `outboundIpAddresses` for this app -
->   Consumption-plan Container Apps draw from a shared, non-static Azure outbound IP pool, not one
->   fixed IP tied to a physical location. That means the DEPLOYED CONTAINER's own DB connectivity
->   shouldn't depend on where the `az` command was run FROM - it depends on whether the Postgres
->   firewall's "Allow public access from Azure services" setting is actually enabled. **Adding
->   Ethan's own current IP to the firewall (the usual local-dev fix) does nothing for the deployed
->   container** - that's a separate setting entirely. Check the `Networking` blade on
->   `star-crm-pg`, or `az postgres flexible-server firewall-rule list`, before assuming "deploy
->   from the office" is the real permanent fix rather than a coincidence or a fragile stopgap.
+> - **UPDATE, later same day - location theory TESTED AND DISPROVEN.** Ethan reactivated the exact
+>   same bad revision (`--0000047`, same image, same code) while physically at Star Flooring, and
+>   it failed identically. Controlled test, one variable, same outcome - location is not the
+>   deciding factor, and it wouldn't make technical sense for it to be: deploying just tells
+>   Azure's control plane to run an image somewhere in Azure's own datacenters, so the deployed
+>   container's network location is never tied to wherever the `az` command happened to be typed.
+>   A later deploy (`starbot:crm-mobile-fixes`) then succeeded with nothing else changed. **Most
+>   likely explanation: 46/47's failures were a transient DB/networking blip on Azure's side**
+>   (Postgres briefly unreachable, restarting, or similar) that had cleared by the time of the
+>   successful deploy - not a standing, location-dependent condition. **The "deploy only from Star
+>   Flooring" guidance below is WRONG and retracted - do not repeat it.**
+> - Root cause is still not actually confirmed (nobody pulled the crash logs for 46/47 or checked
+>   the Postgres firewall's "Allow public access from Azure services" setting before it started
+>   working again), so if this recurs: `az containerapp logs show -n starbot -g starbot --revision
+>   <name> --tail 100` for the real error, and `az postgres flexible-server firewall-rule list -g
+>   starbot -n star-crm-pg` to check that setting - rather than re-guessing from a summary status.
 > - **Related, separate issue that prompted this:** the `uvicorn --reload` failure seen right
 >   before the bad deploys was ordinary LOCAL dev hitting the Postgres firewall (Ethan's current
 >   public IP wasn't allowlisted) - unrelated to the Container App issue above even though the
