@@ -819,12 +819,14 @@ export default function MileageTracker() {
                 const tripStops = stopsOf(t);
                 return (
                   <div key={t.id} className="group rounded px-3 py-2" style={{ border: "1px solid #e5e0d8" }}>
-                    {/* flex-wrap + ml-auto: on a phone the number cluster drops
-                        to its own line instead of colliding with the summary. */}
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {/* flex-col below sm, flex-row at sm+: an explicit stack
+                        rather than relying on flex-wrap to break the two
+                        blocks apart cleanly, which was overlapping them on
+                        narrow phone widths instead of stacking them. */}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-x-2 gap-y-1">
                       <button
                         onClick={() => toggleExpanded(t.id)}
-                        className="flex items-baseline gap-2 min-w-0 text-left flex-1"
+                        className="flex items-baseline gap-2 min-w-0 text-left sm:flex-1"
                         title={open ? "Hide addresses" : "Show all addresses"}
                       >
                         <span className="font-mono text-xs font-bold shrink-0">{t.date}</span>
@@ -839,7 +841,7 @@ export default function MileageTracker() {
                           </span>
                         )}
                       </button>
-                      <span className="flex items-center gap-3 shrink-0 ml-auto">
+                      <span className="flex items-center gap-3 shrink-0 sm:ml-auto">
                         <span className="font-mono text-[13px] font-medium">{t.totalMiles.toFixed(1)} mi</span>
                         <span className="font-mono text-[13px]" style={{ color: "#2F5D50" }}>{fmtMoney(t.dollars)}</span>
                         <span className="font-mono text-[11px]" style={{ color: "#5f6e74" }}>@ {fmtRate(t.rate)}</span>
@@ -857,25 +859,30 @@ export default function MileageTracker() {
                           Start: {t.legs[0]?.from}
                         </div>
                         {t.legs.map((l, i) => (
-                          <div key={i} className="flex items-start justify-between gap-3 text-[13px]">
-                            <div className="min-w-0">
-                              {/* Purpose on its own line above the address so
-                                  a scanner can read "why went there" first,
-                                  then the destination. Only rendered when
-                                  present — return-leg auto-labels as
-                                  "Return to office" at report time but the
-                                  UI here shows the "(return)" suffix instead. */}
-                              {l.purpose && (
-                                <div className="text-[12px] font-semibold leading-tight" style={{ color: SEA }}>
-                                  {l.purpose}
-                                </div>
-                              )}
+                          <div key={i} className="text-[13px]">
+                            {/* Purpose on its own full-width line above the
+                                address/miles row so a scanner reads "why
+                                went there" first — and so the miles/time
+                                badge aligns with the address line beneath it
+                                instead of visually pairing with the purpose
+                                line (items-start pinned it to whichever line
+                                came first when both lived in the same
+                                flex row). Only rendered when present —
+                                return-leg auto-labels as "Return to office"
+                                at report time but the UI here shows the
+                                "(return)" suffix instead. */}
+                            {l.purpose && (
+                              <div className="text-[12px] font-semibold leading-tight" style={{ color: SEA }}>
+                                {l.purpose}
+                              </div>
+                            )}
+                            <div className="flex items-start justify-between gap-3">
                               {/* i past the stop count = the drive back to start */}
-                              <span style={{ color: "#343e41" }}>{i + 1}. {l.to}{i >= tripStops.length ? " (return)" : ""}</span>
+                              <span className="min-w-0" style={{ color: "#343e41" }}>{i + 1}. {l.to}{i >= tripStops.length ? " (return)" : ""}</span>
+                              <span className="font-mono text-[12px] shrink-0" style={{ color: "#5f6e74" }}>
+                                {l.miles.toFixed(1)} mi · {l.minutes}m
+                              </span>
                             </div>
-                            <span className="font-mono text-[12px] shrink-0" style={{ color: "#5f6e74" }}>
-                              {l.miles.toFixed(1)} mi · {l.minutes}m
-                            </span>
                           </div>
                         ))}
                       </div>

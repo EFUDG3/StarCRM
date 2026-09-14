@@ -470,7 +470,7 @@ export default function StarCRM() {
 
           {/* Row 2: the tab bar (+ profile switcher on the CRM board) */}
           <div className="flex flex-wrap items-center gap-3 mt-4">
-            <div className="flex gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid #cdd6d4" }}>
+            <div className="flex gap-0.5 p-0.5 rounded bg-white overflow-x-auto max-w-full" style={{ border: "1px solid #cdd6d4" }}>
               <button onClick={() => switchView("chat")} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap" style={view === "chat" ? { background: INK, color: "white" } : { background: "white", color: INK }}>
                 <Sparkles size={14} /> Starbot
               </button>
