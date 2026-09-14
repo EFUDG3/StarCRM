@@ -131,6 +131,34 @@ This file is the single source of truth for picking the project back up. Read it
 > - **Deferred until:** phase-2 digest is live (target 2026-08-25 today). Then meetings is
 >   next in line.
 
+> **DEPLOY FAILURE MODE (2026-09-14) - revisions `starbot--0000046` and `starbot--0000047` are BAD,
+> built from image tag `starbot:next-action`. DO NOT roll back to either. Both crash-loop on
+> startup with `Cannot reach the database at star-crm-pg... connection timeout expired`.**
+> - **Ethan's observed pattern:** deploying while physically at Star Flooring worked; deploying
+>   from elsewhere produced both bad revisions. **Until the real root cause is confirmed, deploy
+>   only from Star Flooring's network.**
+> - **Worth checking before treating that as the permanent mechanism - flagged, not confirmed:**
+>   `az containerapp show -n starbot -g starbot` lists 150+ `outboundIpAddresses` for this app -
+>   Consumption-plan Container Apps draw from a shared, non-static Azure outbound IP pool, not one
+>   fixed IP tied to a physical location. That means the DEPLOYED CONTAINER's own DB connectivity
+>   shouldn't depend on where the `az` command was run FROM - it depends on whether the Postgres
+>   firewall's "Allow public access from Azure services" setting is actually enabled. **Adding
+>   Ethan's own current IP to the firewall (the usual local-dev fix) does nothing for the deployed
+>   container** - that's a separate setting entirely. Check the `Networking` blade on
+>   `star-crm-pg`, or `az postgres flexible-server firewall-rule list`, before assuming "deploy
+>   from the office" is the real permanent fix rather than a coincidence or a fragile stopgap.
+> - **Related, separate issue that prompted this:** the `uvicorn --reload` failure seen right
+>   before the bad deploys was ordinary LOCAL dev hitting the Postgres firewall (Ethan's current
+>   public IP wasn't allowlisted) - unrelated to the Container App issue above even though the
+>   error text is identical (same code path, `_ensure_schema_or_explain` in `main.py`), which is
+>   exactly why the two got conflated in the moment. Local fix: Portal -> `star-crm-pg` ->
+>   Networking -> **+ Add current client IP address** -> Save. Does NOT fix the deployed container.
+> - **Last known-good revision:** `starbot--0000045` - confirm its actual image tag with
+>   `az containerapp revision show -n starbot -g starbot --revision starbot--0000045 --query
+>   properties.template.containers[0].image` before using it as a rollback target from memory.
+> - Also documented in Notion: **Failure Modes** (full writeup) and **Deployment** (bad-revision
+>   callout + tag list).
+
 > **CRM OVERHAUL (2026-09-11, same day, after the UI pass below) - worked Ethan's backlog of CRM
 > annoyances top-to-bottom, one item at a time with review in between. Login scoping, an address
 > field, several real bugs, and a full log-note auditing system (attribution + edit + soft-delete)
