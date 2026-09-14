@@ -158,6 +158,14 @@ This file is the single source of truth for picking the project back up. Read it
 >   properties.template.containers[0].image` before using it as a rollback target from memory.
 > - Also documented in Notion: **Failure Modes** (full writeup) and **Deployment** (bad-revision
 >   callout + tag list).
+> - **STANDARDIZED (2026-09-14): `--revision-suffix` is no longer optional on `containerapp
+>   update`, and it must match the image TAG exactly** (`starbot:crm-mobile-fixes` ->
+>   `--revision-suffix crm-mobile-fixes`). Root cause of the inconsistent naming Ethan noticed
+>   (some revisions read `starbot--triagerules`, others `starbot--0000046`): omitting the flag
+>   falls back to Azure's auto-incrementing number, which tells you nothing about what's actually
+>   running. One rule, no separate naming scheme to remember. Also updated in the Deployment
+>   Notion page's rollback command, which previously used a generic `rollback` suffix instead of
+>   the previous tag - same fix applies there.
 
 > **CRM OVERHAUL (2026-09-11, same day, after the UI pass below) - worked Ethan's backlog of CRM
 > annoyances top-to-bottom, one item at a time with review in between. Login scoping, an address
