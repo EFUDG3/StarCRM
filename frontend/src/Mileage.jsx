@@ -441,7 +441,7 @@ export default function MileageTracker() {
       {/* Sub-tabs: trip building and the saved log are separate pages — the
           entry side already carries the places rail + day groups. Styled to
           match the app header's segmented control. */}
-      <div className="flex w-fit gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid #cdd6d4" }}>
+      <div className="flex w-fit max-w-full overflow-x-auto gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid #cdd6d4" }}>
         <button
           onClick={() => setSubTab("entry")}
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"

@@ -455,7 +455,11 @@ export default function EmailTab() {
 
       {/* Filter chips + sort control */}
       <div className="flex flex-wrap items-center gap-3 mb-3">
-        <div className="flex flex-wrap gap-0.5 p-0.5 rounded bg-white w-fit"
+        {/* Desktop (sm+): every lane visible as its own pill, one click to
+            switch. On a phone this same row wraps into an uneven 2-per-line
+            grid that reads as clutter, so it's hidden below sm in favor of
+            the dropdown just below — same options, one native picker tap. */}
+        <div className="hidden sm:flex flex-wrap gap-0.5 p-0.5 rounded bg-white w-fit"
           style={{ border: "1px solid " + BORDER }}>
           {FILTERS.map((f) => (
             <button key={f.key} onClick={() => setFilter(f.key)}
@@ -467,6 +471,16 @@ export default function EmailTab() {
             </button>
           ))}
         </div>
+        <select
+          value={FILTERS.some((f) => f.key === filter) ? filter : "all"}
+          onChange={(e) => setFilter(e.target.value)}
+          className="sm:hidden flex-1 min-w-0 border rounded px-3 py-2 text-sm bg-white font-medium"
+          style={{ borderColor: BORDER, color: INK }}
+        >
+          {FILTERS.map((f) => (
+            <option key={f.key} value={f.key}>{f.label} ({f.n})</option>
+          ))}
+        </select>
         {/* Rules sits apart from the lane chips on purpose: it is not another
             slice of the inbox, it is where the user tells the triage how their
             own mail works. */}
@@ -479,7 +493,7 @@ export default function EmailTab() {
         </button>
         <div className="flex items-center gap-1" hidden={filter === "rules"}>
           <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: "#5f6e74" }}>Sort</span>
-          <div className="flex gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid " + BORDER }}>
+          <div className="flex gap-0.5 p-0.5 rounded bg-white overflow-x-auto max-w-full" style={{ border: "1px solid " + BORDER }}>
             {[
               { k: "importance", label: "Importance" },
               { k: "newest", label: "Newest" },
@@ -639,6 +653,7 @@ export default function EmailTab() {
                                 checked={selected.has(t.id)}
                                 onToggleCheck={canBulk ? () => toggleSelected(t.id) : null}
                                 onMove={(state, why) => moveThread(t.id, state, why)}
+                                preferDesktop={!!data?.openInDesktop}
                               />
                             );
                           })}
@@ -684,6 +699,7 @@ export default function EmailTab() {
                           checked={selected.has(t.id)}
                           onToggleCheck={canBulk ? () => toggleSelected(t.id) : null}
                           onMove={(state, why) => moveThread(t.id, state, why)}
+                          preferDesktop={!!data?.openInDesktop}
                         />
                       );
                     })}
@@ -716,7 +732,11 @@ function LaneMore({ rows, expanded, searching, onToggle }) {
   );
 }
 
-function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove }) {
+function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove,
+                     preferDesktop }) {
+  // Classic Outlook desktop link only when the user opted in AND Graph managed
+  // to translate an EntryID for this thread. Either one missing -> OWA link.
+  const desktop = !!(preferDesktop && t.desktopLink);
   const cat = CATEGORY[t.category] || CATEGORY.other;
   const [menu, setMenu] = useState(false);
   const [why, setWhy] = useState("");
@@ -725,12 +745,19 @@ function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove }
   // there is no phantom click target.
   const hasLink = !!t.webLink;
   const Row = hasLink ? "a" : "div";
-  // `_blank` — a NEW tab per row, deliberately. A named target was tried
+  // Desktop deep link when the user opted in AND we managed to translate an
+  // EntryID for this thread; otherwise Outlook on the web. `outlook:` carries
+  // NO target — a custom scheme with target="_blank" leaves an empty tab
+  // behind after the OS hands off to Outlook.
+  //
+  // `_blank` on the web link is deliberate. A named target was tried
   // 2026-09-02 and REVERTED (Ethan): the OWA deeplink renders that ONE message
   // with no inbox around it, so reusing a single tab destroys the one you were
   // reading. Stacking lets you open several, come back to Starbot, and decide
   // what to do next. Do not "fix" this into a shared tab.
-  const rowProps = hasLink
+  const rowProps = desktop
+    ? { href: t.desktopLink }
+    : hasLink
     ? { href: t.webLink, target: "_blank", rel: "noreferrer" }
     : {};
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };

@@ -10,10 +10,14 @@ module never uses application permissions.
 """
 import html
 import re
+import base64
+import logging
 import time
 from typing import Any
 
 import httpx
+
+log = logging.getLogger("uvicorn.error")
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 # San Diego company — render calendar/email times in Pacific.
@@ -346,3 +350,69 @@ def list_mail_folders(token: str) -> dict[str, str]:
         for c in f.get("childFolders", []) or []:
             out[c.get("id", "")] = f"{f.get('displayName', '')}/{c.get('displayName', '')}"
     return out
+
+
+# --- Exchange id translation (Graph restId -> MAPI EntryID) -------------------
+#
+# Classic Outlook finds a message through MAPI, against the local OST. It has no
+# idea what a Graph restId is, so a desktop deep link (`outlook:<hex EntryID>`)
+# needs the id converted first. Graph does the conversion server-side and takes
+# up to 1000 ids per call, so a whole sync costs ONE extra POST.
+#
+# Two conversions are involved and both matter:
+#   restId  -> entryId   via this endpoint (Graph returns URL-safe base64)
+#   base64url -> HEX     locally (the outlook: protocol wants hex)
+#
+# Verified working 2026-09-14: `outlook:<hex>` opens the exact message in
+# Classic Outlook once the HKCU `outlook:` scheme is registered. New Outlook
+# CANNOT do this at all — see CLAUDE.md before revisiting.
+_TRANSLATE_BATCH = 1000
+
+
+def translate_entry_ids(token: str, rest_ids: list[str]) -> dict[str, str]:
+    """restId -> uppercase hex MAPI EntryID, for the ids Graph could convert.
+
+    Best-effort by design: on ANY failure this returns what it has (often
+    nothing) rather than raising. A missing desktop link costs one row its
+    nicer click target; a raised exception would cost the user their whole
+    mailbox sync. `translateExchangeIds` may also need a Graph scope this app
+    does not currently request (docs list User.ReadBasic.All), in which case it
+    403s — the caller must degrade to the OWA webLink, not fail.
+    """
+    out: dict[str, str] = {}
+    ids = [i for i in dict.fromkeys(rest_ids) if i]
+    for start in range(0, len(ids), _TRANSLATE_BATCH):
+        chunk = ids[start:start + _TRANSLATE_BATCH]
+        try:
+            data = _request(token, "POST", "/me/translateExchangeIds", json={
+                "inputIds": chunk,
+                "sourceIdType": "restId",
+                "targetIdType": "entryId",
+            })
+        except GraphError as err:
+            log.warning("translateExchangeIds failed (%s); desktop links skipped "
+                        "for %d ids", err, len(chunk))
+            continue
+        except Exception as err:  # network, parse — same treatment
+            log.warning("translateExchangeIds error (%s); desktop links skipped", err)
+            continue
+        for row in data.get("value", []):
+            src, tgt = row.get("sourceId"), row.get("targetId")
+            if not src or not tgt:
+                continue
+            hex_id = _b64url_to_hex(tgt)
+            if hex_id:
+                out[src] = hex_id
+    return out
+
+
+def _b64url_to_hex(value: str) -> str:
+    """Graph hands back a URL-safe base64 EntryID; the `outlook:` protocol
+    wants the hex form. Padding is restored before decoding because Graph
+    strips it."""
+    try:
+        s = value.replace("-", "+").replace("_", "/")
+        s += "=" * (-len(s) % 4)
+        return base64.b64decode(s).hex().upper()
+    except Exception:
+        return ""

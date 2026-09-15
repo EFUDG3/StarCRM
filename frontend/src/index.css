@@ -92,3 +92,16 @@ button:not(:disabled):active {
   .group:hover .hover-reveal { opacity: 1; }
   .group:focus-within .hover-reveal { opacity: 1; }
 }
+
+/* Native date/time pickers lay out their own internal segments (mm/dd/yyyy +
+   calendar icon) and don't reliably handle an overridden line-height the way
+   plain text does — the text-sm line-height bump in tailwind.config.js
+   (part of the accessibility pass, meant for readable paragraphs/labels) was
+   causing the date segments to wrap oddly inside these inputs on mobile
+   Safari. Reset to the browser's own default, scoped to just these input
+   types so the rest of the readability change is untouched. */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] {
+  line-height: normal;
+}

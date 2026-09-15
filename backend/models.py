@@ -481,6 +481,11 @@ class EmailThread(Base):
     # feedback loop cannot afford to do. Same semantics as dismissed_at_msg_id:
     # the hold releases when a genuinely NEW message lands on the thread.
     manual_msg_id = Column(String, default="")
+    # Hex MAPI EntryID for the latest message, when Graph could translate it.
+    # Feeds the `outlook:<hex>` desktop deep link for Classic Outlook users.
+    # Empty is the normal degraded state (New Outlook, translation refused, or
+    # the scope is missing) and simply means the row keeps its OWA webLink.
+    entry_id_hex = Column(String, default="")
     account_id = Column(String, nullable=True)           # matched shared account (domain match)
     account_name = Column(String, default="")
     triaged_at = Column(DateTime, server_default=func.now())
@@ -530,6 +535,13 @@ class UserPref(Base):
     # rules: "I'm IT admin, DataNet tickets are my actual work" flips a large
     # share of one person's verdicts on its own.
     triage_profile = Column(Text, default="")
+    # Open rows in the Classic Outlook DESKTOP app (`outlook:<hex EntryID>`)
+    # instead of Outlook on the web. DEFAULT FALSE and it must stay that way:
+    # the link only resolves on a machine where the `outlook:` scheme has been
+    # registered AND Classic Outlook is installed. New Outlook cannot do it at
+    # all. Defaulting this on would give those users rows that silently do
+    # nothing, which is the worst failure mode for a list built to be clicked.
+    open_in_desktop = Column(Boolean, nullable=False, default=False)
 
 
 class GlossaryEntry(Base):

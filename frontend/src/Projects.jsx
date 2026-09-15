@@ -301,7 +301,7 @@ export default function Projects() {
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search job, client, PM, address, material"
             className="w-full bg-white border rounded pl-9 pr-3 py-2 text-sm" style={{ borderColor: BORDER }} />
         </div>
-        <div className="flex shrink-0 gap-0.5 p-0.5 rounded bg-white" style={{ border: "1px solid " + BORDER }}>
+        <div className="flex shrink-0 gap-0.5 p-0.5 rounded bg-white overflow-x-auto max-w-full" style={{ border: "1px solid " + BORDER }}>
           {[["all", "All"], ["mine", "My projects"], ["unassigned", "Unassigned"]].map(([k, label]) => (
             <button key={k} onClick={() => setView(k)} className="px-3 py-1.5 text-sm font-medium rounded whitespace-nowrap"
               style={view === k ? { background: INK, color: "white" } : { background: "white", color: INK }}>{label}</button>

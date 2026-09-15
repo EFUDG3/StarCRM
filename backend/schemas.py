@@ -211,10 +211,13 @@ class ProjectLogIn(BaseModel):
 
 
 class EmailPrefIn(BaseModel):
-    """Email tab preferences. Both fields optional so the switch can PUT just
-    the one it changed."""
+    """Email tab preferences. All fields optional so a switch can PUT just the
+    one it changed."""
     digestEnabled: Optional[bool] = None
     digestHour: Optional[int] = Field(default=None, ge=5, le=12)
+    # Open rows in the Classic Outlook desktop app rather than Outlook on the
+    # web. Requires the HKCU `outlook:` scheme registered on that machine.
+    openInDesktop: Optional[bool] = None
 
 
 class ThreadReclassifyIn(BaseModel):

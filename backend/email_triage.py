@@ -267,6 +267,7 @@ def sync_user(db: Session, user: User, token: str) -> dict:
     if ambiguous:
         _triage_model(db, user, ambiguous, guidance=guidance)
     _bump_rule_hits(db, user, list(touched.values()))
+    _fill_desktop_links(token, list(touched.values()))
 
     # Retention: prune what the tab will never show again.
     cutoff = (_now() - timedelta(days=RETENTION_DAYS)).isoformat()
@@ -436,6 +437,34 @@ def _user_rules(db: Session, user: User) -> tuple[list, set[str], str]:
         if line:
             guidance_bits.append(f"- {line}")
     return hard, active, "\n".join(guidance_bits)
+
+
+def _fill_desktop_links(token: str, threads: list[EmailThread]) -> None:
+    """Translate each touched thread's latest message id into a hex MAPI
+    EntryID, for the Classic Outlook desktop deep link.
+
+    ONE batched Graph POST per sync covering every touched thread (the endpoint
+    takes 1000 ids at a time), and entirely best-effort: if translation is
+    refused — most likely because `translateExchangeIds` wants a scope this app
+    does not request — every thread simply keeps an empty `entry_id_hex` and
+    rows fall back to the OWA webLink. A sync must never fail over a nicer
+    click target.
+
+    Re-translated whenever a thread is touched, which is also what keeps the id
+    fresh: moving a message between folders changes its EntryID in Exchange,
+    and a move shows up as a delta change, so the thread comes back through
+    here and the stale id is replaced.
+    """
+    pending = [t for t in threads if t.last_message_id]
+    if not pending:
+        return
+    mapping = graph.translate_entry_ids(token, [t.last_message_id for t in pending])
+    if not mapping:
+        return
+    for t in pending:
+        hex_id = mapping.get(t.last_message_id)
+        if hex_id:
+            t.entry_id_hex = hex_id
 
 
 def _bump_rule_hits(db: Session, user: User, threads: list[EmailThread]) -> None:
@@ -647,6 +676,13 @@ def _serialize(t: EmailThread) -> dict:
         "snippet": t.snippet or "",
         "folder": t.folder or "",
         "webLink": t.web_link or "",
+        # `outlook:<hex EntryID>` — opens the message in the Classic Outlook
+        # DESKTOP app. Only resolves where the HKCU `outlook:` scheme is
+        # registered and Classic is installed, so the frontend uses it ONLY
+        # when the user opted in. Empty means fall back to webLink.
+        # Deliberately NOT added to the starbot chat op below: a chat answer
+        # needs a link the reader can actually follow from anywhere.
+        "desktopLink": f"outlook:{t.entry_id_hex}" if t.entry_id_hex else "",
         "state": t.state,
         "rank": t.rank,
         "category": t.category or "other",
@@ -715,6 +751,7 @@ def _overview(db: Session, user: User) -> dict:
         "resolvedWaiting": waiting,
         "digestEnabled": bool(pref.digest_enabled) if pref else False,
         "digestHour": pref.digest_hour if pref else 7,
+        "openInDesktop": bool(pref.open_in_desktop) if pref else False,
         "lanes": {k: [_serialize(t) for t in v] for k, v in lanes.items()},
     }
 
@@ -800,10 +837,14 @@ def set_prefs(
         pref.digest_enabled = bool(payload.digestEnabled)
     if payload.digestHour is not None:
         pref.digest_hour = max(5, min(int(payload.digestHour), 12))
+    if payload.openInDesktop is not None:
+        pref.open_in_desktop = bool(payload.openInDesktop)
     db.commit()
     telemetry.log_event(user.id, "email", "prefs",
-                        f"digest={'on' if pref.digest_enabled else 'off'}")
-    return {"digestEnabled": pref.digest_enabled, "digestHour": pref.digest_hour}
+                        f"digest={'on' if pref.digest_enabled else 'off'} "
+                        f"desktop={'on' if pref.open_in_desktop else 'off'}")
+    return {"digestEnabled": pref.digest_enabled, "digestHour": pref.digest_hour,
+            "openInDesktop": pref.open_in_desktop}
 
 
 @router.post("/threads/{thread_id}/dismiss")

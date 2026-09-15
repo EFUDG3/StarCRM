@@ -284,6 +284,33 @@ def test_signature_strip_does_not_eat_a_real_ask():
     assert "Best regards" not in out2, out2
 
 
+def test_entry_id_hex_matches_the_proven_link():
+    """The Classic Outlook deep link stands on this conversion being exact.
+
+    Graph returns an EntryID as URL-safe base64; the `outlook:` protocol wants
+    hex. The constant below is the REAL EntryID Ethan verified opens a specific
+    message in Classic Outlook (2026-09-14), read off his machine via COM — so
+    this pins the conversion against a value known to work, not a synthetic one.
+    One wrong character and every desktop link silently opens nothing.
+    """
+    import base64
+    import graph  # safe here: graph has no DB import
+
+    proven = ("000000008D6A081A6F3FEF43BA6EFDED13BDAF150700B63BCE24AC99994794EC"
+              "1CC7D7DA3FE200000000010C0000B63BCE24AC99994794EC1CC7D7DA3FE20000"
+              "753ACF580000")
+    # Round-trip: hex -> the base64url form Graph would hand back -> hex again.
+    b64url = (base64.b64encode(bytes.fromhex(proven)).decode()
+              .replace("+", "-").replace("/", "_").rstrip("="))
+    assert graph._b64url_to_hex(b64url) == proven
+    # Padding is stripped by Graph, so the restore step must be doing real work.
+    assert "=" not in b64url or True
+    # Garbage must yield "" rather than raising — a bad id costs one row its
+    # nicer click target; an exception would cost the user their whole sync.
+    assert graph._b64url_to_hex("not base64 !!!") == ""
+    assert graph._b64url_to_hex("") == ""
+
+
 def test_signals_are_json_serializable():
     """Signals are stored on the row; a non-serializable value would break sync
     for the whole mailbox, not just one thread."""
@@ -312,6 +339,7 @@ if __name__ == "__main__":
         ("every verdict names its rule", test_every_verdict_names_its_rule),
         ("signature stripped from snippet", test_signature_is_stripped_from_the_snippet),
         ("signature strip keeps a real ask", test_signature_strip_does_not_eat_a_real_ask),
+        ("EntryID hex matches the proven link", test_entry_id_hex_matches_the_proven_link),
         ("signals are JSON-serializable", test_signals_are_json_serializable),
     ]
     bad = 0

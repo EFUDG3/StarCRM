@@ -131,6 +131,108 @@ This file is the single source of truth for picking the project back up. Read it
 > - **Deferred until:** phase-2 digest is live (target 2026-08-25 today). Then meetings is
 >   next in line.
 
+> - **CONFIRMED WORKING 2026-09-14: `outlook:<hex EntryID>` opens a specific message in CLASSIC
+>   Outlook, from a browser link.** Ethan tested it end to end on his work machine. This is the
+>   answer to the deep-link question - NOT built, NOT deployed, parked on the rollout decision
+>   (see the bottom of this note).
+> - **Why the earlier `ms-outlook` attempts failed, and why this one does not** (read off Ethan's
+>   machine, not assumed):
+>   - `ms-outlook` is declared by the **New Outlook MSIX package ONLY**
+>     (`AppX1scw7cgxcz9hmq03sd8qajzg3s9t7901`). Classic Outlook never declares it, so Windows has
+>     exactly ONE candidate and the "default mail app" setting has nothing to choose between.
+>     **That is why every `ms-outlook://` link opened New Outlook despite Ethan having his defaults
+>     pointed at Classic.** Not a settings problem; not fixable by settings.
+>   - Classic's own registered schemes are `Outlook.URL.{mailto,webcal,feed,stssync,ms-olk-oauth,
+>     ms-olk-recall}.15` - **there is no `Outlook.URL.outlook.15`**, i.e. the `outlook:` scheme is
+>     claimed by NOBODY by default. That is the opening: registering it has no competing owner, so
+>     it can only resolve to Classic.
+>   - The payloads differ in kind too: `ms-outlook://emails/message?id=` hands New Outlook a
+>     SERVER-SIDE Graph id it cannot resolve; `outlook:<EntryID>` hands Classic a **MAPI EntryID**,
+>     a pointer into the local OST that Classic resolves natively. Microsoft's "switch back to
+>     Classic" error meant Classic has the MAPI machinery - not that the same URL works there.
+> - **CORRECTION to an earlier claim in this file: Classic Outlook IS installed on Ethan's machine**
+>   at `C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE` (running alongside `olk.exe`).
+>   The earlier "Classic is NOT installed" conclusion came from checking
+>   `HKLM\...\App Paths\OUTLOOK.EXE`, which **this install does not write**. App Paths is an
+>   unreliable presence test - read the running process path or probe the Office install dir.
+> - **The exact registration that worked (HKCU, NO admin):**
+>   `New-Item -Path "HKCU:\Software\Classes\outlook\shell\open\command" -Force`, then on
+>   `HKCU:\Software\Classes\outlook` set `(default)` = `URL:Outlook Protocol` and `URL Protocol` =
+>   `""`, and on the `\shell\open\command` subkey set `(default)` =
+>   `"<OUTLOOK.EXE path>" /select "%1"`.
+> - **Getting an EntryID for testing WITHOUT any Graph call** (useful for future probes): attach to
+>   the running Classic Outlook over COM and read the selected message -
+>   `[Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application").ActiveExplorer().Selection.Item(1).EntryID`
+>   returns the hex EntryID directly.
+> - **IMPLEMENTATION SKETCH (agreed but NOT built):** batched `POST /me/translateExchangeIds` at
+>   sync time (`sourceIdType: restId` -> `targetIdType: entryId`, up to 1000 ids per call = ONE
+>   extra POST per sync) -> **convert the returned URL-safe base64 to HEX** (Graph returns
+>   base64url, the protocol wants hex) -> store the hex on the thread row (~200 bytes) -> emit
+>   `outlook:<hex>` as the row href behind a **per-user preference defaulting OFF**, so New Outlook
+>   and phone users keep the OWA `webLink` instead of getting rows that silently do nothing. Rows
+>   keep `target="_blank"` for the OWA case; an `outlook:` href should carry NO target (a `_blank`
+>   custom-scheme link leaves an empty tab behind).
+>   - **UNVERIFIED RISK: `translateExchangeIds` may need a Graph scope we do not have.** Docs list
+>     the least-privileged delegated permission as `User.ReadBasic.All`; our app currently requests
+>     Mail.Read / Calendars.Read / Sites.Read.All / Files.Read.All / User.Read. If it 403s, that is
+>     a new scope + admin consent (Ethan can grant). Build the call to degrade gracefully - no
+>     desktop link, fall back to webLink - rather than failing the sync.
+>   - **EntryIDs are per-mailbox** (translate must run per-user with their own delegated token; an
+>     id from one mailbox is meaningless in another) **and can go stale** when a message is moved
+>     between folders. A move also produces a delta change, so the next sync should re-translate -
+>     verify rather than assume. Graph's `immutableEntryId` is stable across moves but is a
+>     different format the MAPI handler probably will not accept.
+> - **STAGE 1 IS BUILT (2026-09-14). Not committed, not deployed.**
+>   - `graph.translate_entry_ids(token, rest_ids)` - batched `POST /me/translateExchangeIds`
+>     (`restId` -> `entryId`, 1000 ids per call, so ONE extra POST per sync) plus
+>     `graph._b64url_to_hex()`. **Best-effort by contract: ANY failure returns what it has and
+>     logs, never raises** - a missing desktop link costs one row its nicer click target, an
+>     exception would cost the user their whole mailbox sync.
+>   - `email_triage._fill_desktop_links()` runs at the end of `sync_user` over the touched
+>     threads. Re-translating on every touch is also what keeps ids FRESH: moving a message
+>     between folders changes its EntryID, and a move is a delta change, so the thread comes back
+>     through here.
+>   - Schema (both additive): `email_threads.entry_id_hex`, `user_prefs.open_in_desktop` BOOLEAN
+>     NOT NULL DEFAULT FALSE.
+>   - `_serialize` gains `desktopLink` = `outlook:<hex>` (empty when untranslated).
+>     **Deliberately NOT added to the starbot chat op** - a chat answer needs a link the reader
+>     can follow from anywhere.
+>   - Preference plumbed through `EmailPrefIn.openInDesktop` -> `PUT /api/email/prefs`, returned
+>     by both `_overview` and `GET /api/email/rules`. UI: a **"Where rows open"** section in the
+>     Rules tab, OFF by default, copy that names Classic Outlook explicitly and warns rows will
+>     do nothing if the computer has not been set up.
+>   - `ThreadRow` takes `preferDesktop` and uses the desktop href only when the pref is on AND
+>     that thread actually has a `desktopLink`. **The `outlook:` href carries NO `target`** - a
+>     custom scheme with `target="_blank"` leaves an empty tab behind after the OS hands off. The
+>     OWA path keeps `target="_blank"` (see the revert note above).
+>   - **New invariant `test_entry_id_hex_matches_the_proven_link`** round-trips the conversion
+>     against the REAL EntryID Ethan verified opens a message in Classic Outlook, read off his
+>     machine via COM. One wrong character and every desktop link silently opens nothing, so this
+>     is pinned to a known-good value rather than a synthetic one. Also asserts garbage input
+>     yields `""` rather than raising. **39 cases + 10 invariants + 16 suggester checks pass;
+>     `npm run build` clean.**
+>   - **UNVERIFIED AND THE FIRST THING TO WATCH: `translateExchangeIds` may 403.** Docs list the
+>     least-privileged delegated permission as `User.ReadBasic.All`; this app requests
+>     `User.Read / Mail.Read / Calendars.Read / Sites.Read.All / Files.Read.All`. If it refuses,
+>     the log line is `translateExchangeIds failed (...); desktop links skipped` and every
+>     `entry_id_hex` stays empty - rows keep working on the OWA link, nothing breaks, but the
+>     feature does nothing until the scope is added + admin-consented (Ethan can grant).
+>     **Check the container log after the first sync before concluding anything about the UI.**
+> - **ROLLOUT: PHASED, Ethan's call 2026-09-14** - *"build the back end, then I have salam test it.
+>   then finally we can have a tab for connecting it telling staff how to run it / I go to
+>   datanet."* Three stages, in order:
+>   1. **Backend + per-user preference** (defaults OFF). Salam runs the HKCU one-liner by hand and
+>      flips the toggle. One real Classic user, no vendor dependency.
+>   2. **Setup panel in the app** - a "Set this up on your computer" section telling staff how to
+>      run it, once stage 1 proves out.
+>   3. **DataNet** for fleet-wide push, with evidence rather than a hunch.
+>   The blocker was never code - it is getting the HKCU key onto every machine. **Honest cost worth
+>   restating before stage 3: a per-machine registry change on every PC, coordinated with an
+>   external vendor, to change WHERE A LINK OPENS.** Any distributed script must DISCOVER the
+>   OUTLOOK.EXE path (App Paths is unreliable - see the correction above), so a static `.reg` file
+>   is the wrong vehicle; Intune **Remediations** (detection + remediation pair, USER context since
+>   it is HKCU) is the right one because it self-heals and covers new machines.
+
 > **DEPLOY FAILURE MODE (2026-09-14) - revisions `starbot--0000046` and `starbot--0000047` are BAD,
 > built from image tag `starbot:next-action`. DO NOT roll back to either. Both crash-loop on
 > startup with `Cannot reach the database at star-crm-pg... connection timeout expired`.**
@@ -750,6 +852,49 @@ This file is the single source of truth for picking the project back up. Read it
 > - **Strategic note:** Microsoft is moving everyone to New Outlook (Classic supported to 2029 but
 >   the direction is set), so the payoff on Classic-only deep linking shrinks every quarter. Weigh
 >   that before spending the hour.
+
+> - **SETTLED BY DIRECT TEST 2026-09-14: New Outlook CANNOT open an existing message from a link.
+>   Stop investigating this; it is closed by Microsoft's own error message, not by inference.**
+> - **Ethan's prompt for the test was a good one:** `mailto:` links in the CRM DO open Outlook
+>   straight from the browser, so why not existing messages? **Answer: `mailto:` carries no
+>   reference to an existing item.** It is a COMPOSE instruction - the handler opens a blank window
+>   and fills in fields, no lookup happens. Opening an existing message requires the handler to
+>   RESOLVE AN IDENTIFIER against the mail store. The transport (browser -> OS -> app) was never the
+>   problem; the verb on the other end is.
+> - **What the click-test actually returned** (real restId from Ethan's mailbox, run on his New
+>   Outlook machine):
+>   - `ms-outlook://` -> **opens New Outlook.** Scheme is registered and alive; transport confirmed.
+>   - `ms-outlook://compose?to=...` -> opens Outlook but NO compose window. (Plain `mailto:` still
+>     composes correctly, so use `mailto:` for compose - the `ms-outlook` compose verb is not it.)
+>   - `ms-outlook://emails/message?id=<restId>`, the same with the OWA `ItemID` form, and the
+>     `emails/message/<id>` path form -> **all three return, verbatim:** *"This action isn't
+>     supported yet. The New Outlook for Windows doesn't currently support this action. You can
+>     switch back to Classic Outlook for Windows and try again."*
+>   - The OWA `webLink` control -> works as today.
+> - **Why that error is the strongest possible evidence:** New Outlook PARSES the action, RECOGNISES
+>   it, and explicitly declines it. No URL shape will get around that - it is a missing feature, not
+>   a syntax problem. This supersedes the earlier hedging about forum posts.
+> - **AND IT POINTS SOMEWHERE USEFUL: Microsoft's own text says the action works in CLASSIC
+>   Outlook.** That matters because Star's office staff, management, Salam and the boss are all on
+>   Classic - Ethan is the New Outlook outlier. **If `ms-outlook://emails/message?id=` works on
+>   Classic, the implementation collapses to almost nothing: NO `translateExchangeIds`, NO
+>   base64url->hex EntryID conversion, NO registry change** - just emit the URL for users who opt in.
+>   That is far simpler than the `outlook:<hex EntryID>` plan sketched earlier, which should be
+>   treated as the FALLBACK, not the primary.
+> - **NEXT TEST (decides the whole implementation):**
+>   `C:\Users\ethan\Downloads\outlook-classic-deeplink-test.html` - open it on a PC running CLASSIC
+>   Outlook **signed in as ethan@starflooringandremodeling.com**. Note WHICH of forms A/B/C opens
+>   the message; that one becomes the URL we emit.
+>   **Gotcha the page warns about: the message id is MAILBOX-SPECIFIC.** Running it on Salam's
+>   machine would fail even though Salam is on Classic, because the id points at a message in
+>   Ethan's mailbox. A wrong-mailbox result looks like a failure but is not one.
+> - **Id forms are NOT interchangeable, confirmed against prod:** the stored Graph `restId`
+>   (`email_threads.last_message_id`) and the `ItemID` inside the OWA `webLink` differ - the restId
+>   has `-` where the ItemID has `/` (percent-encoded `%2F`). Any implementation must test which
+>   form the handler wants rather than assuming.
+> - **Design when it lands:** per-user preference defaulting OFF (New Outlook and phone users must
+>   keep the OWA link, or they get rows that silently do nothing), Classic users opt in. Rows keep
+>   `target="_blank"` regardless - see the revert note above.
 
 > - **CORRECTIONS to the Outlook-deeplink note above (Ethan asked for sources; two claims did not
 >   survive checking).** Keep these straight, because the Classic path IS worth building later.

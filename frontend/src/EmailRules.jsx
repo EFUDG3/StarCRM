@@ -228,7 +228,22 @@ export default function EmailRules({ onChanged }) {
       {/* 4. MAINTENANCE ----------------------------------------------------- */}
       <Maintenance />
 
-      {/* 5. COMPANY RULES -------------------------------------------------- */}
+      {/* 5. WHERE ROWS OPEN — deliberately BELOW Maintenance and last of the
+          "settings" sections: it is opt-in and does nothing until a computer
+          has been set up for it, so it should not compete for attention with
+          the two sections everyone can use today. */}
+      <OpenInDesktop initial={!!data.openInDesktop} busy={busy}
+        onToggle={(on) => guard(async () => {
+          await api.setEmailPrefs({ openInDesktop: on });
+          setNote(on
+            ? "Rows will open in Classic Outlook. Nothing happens on a computer that hasn't been set up."
+            : "Rows will open in Outlook on the web.");
+          await load();
+          onChanged?.();
+          setTimeout(() => setNote(""), 6000);
+        })} />
+
+      {/* 6. COMPANY RULES -------------------------------------------------- */}
       <CompanyRules rules={companyRules} busy={busy}
         onToggle={(id, on) => guard(async () => {
           const next = companyRules
@@ -265,7 +280,7 @@ function AddRuleForm({ signals, busy, onCancel, onSubmit }) {
       {/* Hard vs soft is a real distinction, so it is named in the user's
           terms: an exact match runs instantly and for free, a judgment rule
           needs the model and only applies where the rules are unsure. */}
-      <div className="flex gap-0.5 p-0.5 rounded bg-white w-fit mb-3" style={{ border: "1px solid " + BORDER }}>
+      <div className="flex gap-0.5 p-0.5 rounded bg-white w-fit max-w-full overflow-x-auto mb-3" style={{ border: "1px solid " + BORDER }}>
         {[
           { k: "hard", label: "Exact match" },
           { k: "soft", label: "Judgment call" },
@@ -364,6 +379,52 @@ function ProfileBox({ initial, busy, onSave }) {
             </button>
           )}
         </div>
+      </div>
+    </section>
+  );
+}
+
+// --- Where rows open ----------------------------------------------------------
+
+// OFF by default and it must stay that way. The `outlook:` link only resolves on
+// a machine where that scheme has been registered AND Classic Outlook is
+// installed; New Outlook cannot open an existing message from a link at all
+// (settled by direct test 2026-09-14 — see CLAUDE.md). Defaulting this on would
+// give those users rows that silently do nothing, which is the worst failure
+// mode for a list whose whole job is to be clicked.
+function OpenInDesktop({ initial, busy, onToggle }) {
+  const [on, setOn] = useState(initial);
+  const flip = () => {
+    const want = !on;
+    setOn(want);              // optimistic; the reload below settles it
+    onToggle(want);
+  };
+  return (
+    <section className="bg-white rounded-lg border overflow-hidden" style={{ borderColor: BORDER }}>
+      <div className="px-3 py-2.5" style={{ borderBottom: "1px solid " + ROW_LINE }}>
+        <span className="font-mono text-[10px] font-bold uppercase tracking-widest" style={{ color: INK }}>
+          Where rows open
+        </span>
+      </div>
+      <div className="px-3 py-3 flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium" style={{ color: INK }}>
+            Open mail in the Outlook desktop app
+          </div>
+          <p className="text-xs mt-0.5" style={{ color: "#5f6e74" }}>
+            Off by default: rows open Outlook on the web, which works everywhere.
+            Turn this on only if you use <strong>Classic Outlook</strong> {" "}
+            <strong>and your computer has been set up for it — otherwise rows will do nothing</strong>.
+            It does not work in the new Outlook, and it has to be set up on each computer you use.
+          </p>
+        </div>
+        <button role="switch" aria-checked={on} onClick={flip} disabled={busy}
+          title={on ? "Use Outlook on the web instead" : "Use the Classic Outlook desktop app"}
+          className="shrink-0 relative w-9 h-5 rounded-full transition-colors disabled:opacity-60"
+          style={{ background: on ? "#2F5D50" : "#cdd6d4" }}>
+          <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+            style={{ left: on ? "18px" : "2px" }} />
+        </button>
       </div>
     </section>
   );

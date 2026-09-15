@@ -388,6 +388,7 @@ def get_rules(
         "companyRules": company,
         "suggestions": [_serialize_suggestion(s) for s in sugg],
         "profile": (pref.triage_profile if pref else "") or "",
+        "openInDesktop": bool(pref.open_in_desktop) if pref else False,
         "correctionCount": corrections,
         "suggestThreshold": SUGGEST_THRESHOLD,
         "signals": triage_engine.SIGNAL_LABELS,

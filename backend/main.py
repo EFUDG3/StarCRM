@@ -119,6 +119,11 @@ def _ensure_schema() -> None:
         conn.execute(text("ALTER TABLE email_threads ADD COLUMN IF NOT EXISTS signals_json TEXT DEFAULT '{}'"))
         conn.execute(text("ALTER TABLE email_threads ADD COLUMN IF NOT EXISTS decided_by VARCHAR DEFAULT ''"))
         conn.execute(text("ALTER TABLE email_threads ADD COLUMN IF NOT EXISTS manual_msg_id VARCHAR DEFAULT ''"))
+        # Classic Outlook desktop deep links (2026-09-14). Hex MAPI EntryID per
+        # thread + the per-user opt-in. Both additive; empty/false is the
+        # correct degraded state for everyone without the registry key.
+        conn.execute(text("ALTER TABLE email_threads ADD COLUMN IF NOT EXISTS entry_id_hex VARCHAR DEFAULT ''"))
+        conn.execute(text("ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS open_in_desktop BOOLEAN NOT NULL DEFAULT FALSE"))
         # Per-user rule scoping. NULL triage_rules_json means "not initialized"
         # -> tier-1 mechanical rules only, so a new inbox never inherits
         # another person's judgment rules.
