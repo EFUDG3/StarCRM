@@ -131,6 +131,32 @@ This file is the single source of truth for picking the project back up. Read it
 > - **Deferred until:** phase-2 digest is live (target 2026-08-25 today). Then meetings is
 >   next in line.
 
+> - **STAGE 1 COMMITTED + IMAGE BUILT (2026-09-15). Not deployed as a revision — Ethan is running
+>   that himself.**
+>   - UI polish per Ethan's review: "Where rows open" moved BELOW Maintenance in the Rules tab
+>     (it is opt-in and does nothing until a computer is set up for it, so it should not compete
+>     for attention with the two sections everyone can use today), and the warning line is bolded
+>     end-to-end: *"and your computer has been set up for it — otherwise rows will do nothing"*.
+>   - **Committed as `d7afdc0`** — "email: Classic Outlook desktop deep links (opt-in) + mobile
+>     scroll/date fixes". Bundled per Ethan's direction with three small pre-existing, unrelated
+>     fixes already sitting in the tree (confirmed benign before staging): `overflow-x-auto` on the
+>     Accounts/Projects filter bars and the Mileage sub-tab bar (so they scroll on narrow screens
+>     instead of overflowing), and a `line-height: normal` reset scoped to
+>     `input[type="date"|"time"|"datetime-local"]` (the accessibility pass's `text-sm` line-height
+>     bump was wrapping native date-picker segments oddly on mobile Safari).
+>   - **Image built + pushed to ACR:** `starbot:outlook-desktop-links`, Run ID `ds1r`, 1m2s,
+>     digest `sha256:ba1099dbd9fb19e6493fd7e77e43eebd214d1332339864ca666db30b9b9e3d8a`. Bundle
+>     `index-B9PzngMz.js` matches the local build exactly (505.55 kB), so the image contains
+>     precisely what was verified. **NOT rolled to a Container App revision** — Ethan said he
+>     would push the commit and run `containerapp update` himself; per the standardized rule,
+>     that means `--revision-suffix outlook-desktop-links` to match the tag.
+>   - All checks still green before the build: 39 cases, 10 invariants, 16 suggester checks,
+>     `npm run build` clean.
+>   - **Notion updated to match** (Deployment tag list, Architecture data-model summary, and the
+>     Improvement Planning backlog line "going straight to outlook instead of in web" annotated
+>     with the build status and the phased rollout plan) — so the Notion docs and this file agree
+>     with what actually shipped versus what is still pending.
+
 > - **CONFIRMED WORKING 2026-09-14: `outlook:<hex EntryID>` opens a specific message in CLASSIC
 >   Outlook, from a browser link.** Ethan tested it end to end on his work machine. This is the
 >   answer to the deep-link question - NOT built, NOT deployed, parked on the rollout decision
