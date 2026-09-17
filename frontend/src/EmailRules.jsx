@@ -228,10 +228,20 @@ export default function EmailRules({ onChanged }) {
       {/* 4. MAINTENANCE ----------------------------------------------------- */}
       <Maintenance />
 
-      {/* 5. WHERE ROWS OPEN — deliberately BELOW Maintenance and last of the
-          "settings" sections: it is opt-in and does nothing until a computer
-          has been set up for it, so it should not compete for attention with
-          the two sections everyone can use today. */}
+      {/* 5. COMPANY RULES -------------------------------------------------- */}
+      <CompanyRules rules={companyRules} busy={busy}
+        onToggle={(id, on) => guard(async () => {
+          const next = companyRules
+            .filter((r) => r.editable && (r.id === id ? on : r.active))
+            .map((r) => r.id);
+          afterWrite(await api.setTriageProfile({ companyRules: next }));
+        })} />
+
+      {/* 6. WHERE ROWS OPEN — last, and collapsed like Built-in rules. This is
+          a niche opt-in with a real per-machine setup cost (a registry entry
+          Ethan or DataNet has to put on each PC) and no near-term path to
+          wider rollout, so it should not sit open by default competing with
+          the sections everyone actually uses. */}
       <OpenInDesktop initial={!!data.openInDesktop} busy={busy}
         onToggle={(on) => guard(async () => {
           await api.setEmailPrefs({ openInDesktop: on });
@@ -241,15 +251,6 @@ export default function EmailRules({ onChanged }) {
           await load();
           onChanged?.();
           setTimeout(() => setNote(""), 6000);
-        })} />
-
-      {/* 6. COMPANY RULES -------------------------------------------------- */}
-      <CompanyRules rules={companyRules} busy={busy}
-        onToggle={(id, on) => guard(async () => {
-          const next = companyRules
-            .filter((r) => r.editable && (r.id === id ? on : r.active))
-            .map((r) => r.id);
-          afterWrite(await api.setTriageProfile({ companyRules: next }));
         })} />
     </div>
   );
@@ -393,6 +394,11 @@ function ProfileBox({ initial, busy, onSave }) {
 // give those users rows that silently do nothing, which is the worst failure
 // mode for a list whose whole job is to be clicked.
 function OpenInDesktop({ initial, busy, onToggle }) {
+  // Collapsed by default, same disclosure pattern as Built-in rules: this is
+  // a niche opt-in with a real per-machine setup cost and no near-term path
+  // to wider rollout, so it stays out of the way until someone goes looking
+  // for it.
+  const [open, setOpen] = useState(false);
   const [on, setOn] = useState(initial);
   const flip = () => {
     const want = !on;
@@ -401,31 +407,41 @@ function OpenInDesktop({ initial, busy, onToggle }) {
   };
   return (
     <section className="bg-white rounded-lg border overflow-hidden" style={{ borderColor: BORDER }}>
-      <div className="px-3 py-2.5" style={{ borderBottom: "1px solid " + ROW_LINE }}>
+      <button onClick={() => setOpen((v) => !v)}
+        className="w-full px-3 py-2.5 flex items-center gap-2 text-left hover:bg-stone-50">
         <span className="font-mono text-[10px] font-bold uppercase tracking-widest" style={{ color: INK }}>
           Where rows open
         </span>
-      </div>
-      <div className="px-3 py-3 flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium" style={{ color: INK }}>
-            Open mail in the Outlook desktop app
+        <span className="font-mono text-xs" style={{ color: on ? "#2b6a58" : "#5f6e74" }}>
+          {on ? "Desktop" : "Web"}
+        </span>
+        <span className="ml-auto font-mono text-[10px]" style={{ color: "#5f6e74" }}>
+          {open ? "Hide" : "Show"}
+        </span>
+      </button>
+
+      {open && (
+        <div className="px-3 py-3 flex items-start gap-3" style={{ borderTop: "1px solid " + ROW_LINE }}>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium" style={{ color: INK }}>
+              Open mail in the Outlook desktop app
+            </div>
+            <p className="text-xs mt-0.5" style={{ color: "#5f6e74" }}>
+              Off by default: rows open Outlook on the web, which works everywhere.
+              Turn this on only if you use <strong>Classic Outlook</strong> {" "}
+              <strong>and your computer has been set up for it — otherwise rows will do nothing</strong>.
+              It does not work in the new Outlook, and it has to be set up on each computer you use.
+            </p>
           </div>
-          <p className="text-xs mt-0.5" style={{ color: "#5f6e74" }}>
-            Off by default: rows open Outlook on the web, which works everywhere.
-            Turn this on only if you use <strong>Classic Outlook</strong> {" "}
-            <strong>and your computer has been set up for it — otherwise rows will do nothing</strong>.
-            It does not work in the new Outlook, and it has to be set up on each computer you use.
-          </p>
+          <button role="switch" aria-checked={on} onClick={flip} disabled={busy}
+            title={on ? "Use Outlook on the web instead" : "Use the Classic Outlook desktop app"}
+            className="shrink-0 relative w-9 h-5 rounded-full transition-colors disabled:opacity-60"
+            style={{ background: on ? "#2F5D50" : "#cdd6d4" }}>
+            <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+              style={{ left: on ? "18px" : "2px" }} />
+          </button>
         </div>
-        <button role="switch" aria-checked={on} onClick={flip} disabled={busy}
-          title={on ? "Use Outlook on the web instead" : "Use the Classic Outlook desktop app"}
-          className="shrink-0 relative w-9 h-5 rounded-full transition-colors disabled:opacity-60"
-          style={{ background: on ? "#2F5D50" : "#cdd6d4" }}>
-          <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
-            style={{ left: on ? "18px" : "2px" }} />
-        </button>
-      </div>
+      )}
     </section>
   );
 }

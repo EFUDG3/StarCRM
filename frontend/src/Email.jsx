@@ -875,23 +875,10 @@ function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove,
         {menu && onMove && (
           <div onClick={stop} className="mt-2 rounded border p-2"
             style={{ borderColor: BORDER, background: MIST }}>
-            <div className="font-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "#5f6e74" }}>
-              Where does this belong?
+            <div className="font-mono text-[10px] uppercase tracking-widest mb-1" style={{ color: "#6f7d82" }}>
+              Why are you moving it?
             </div>
             <div className="flex flex-wrap gap-1 mb-2">
-              {MOVE_TARGETS.filter((m) => m.state !== t.state).map((m) => (
-                <button key={m.state}
-                  onClick={(e) => { stop(e); setMenu(false); onMove(m.state, why || undefined); setWhy(""); }}
-                  className="px-2.5 py-1 rounded text-xs font-medium bg-white border hover:bg-stone-100"
-                  style={{ borderColor: BORDER, color: INK }}>
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            <div className="font-mono text-[10px] uppercase tracking-widest mb-1" style={{ color: "#6f7d82" }}>
-              Why? (optional)
-            </div>
-            <div className="flex flex-wrap gap-1">
               {WHY_CHIPS.map((c) => (
                 <button key={c.k} onClick={(e) => { stop(e); setWhy(why === c.k ? "" : c.k); }}
                   className="px-2 py-0.5 rounded-full text-[11px] border"
@@ -899,6 +886,26 @@ function ThreadRow({ t, onDismiss, onUndismiss, checked, onToggleCheck, onMove,
                     ? { background: SEA, color: "white", borderColor: SEA }
                     : { background: "white", color: "#343e41", borderColor: BORDER }}>
                   {c.label}
+                </button>
+              ))}
+              <button onClick={(e) => { stop(e); setWhy(""); }}
+                className="px-2 py-0.5 rounded-full text-[11px] border"
+                style={!why
+                  ? { background: "#5f6e74", color: "white", borderColor: "#5f6e74" }
+                  : { background: "white", color: "#5f6e74", borderColor: BORDER }}>
+                Skip
+              </button>
+            </div>
+            <div className="font-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "#5f6e74" }}>
+              Where does this belong?
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {MOVE_TARGETS.filter((m) => m.state !== t.state).map((m) => (
+                <button key={m.state}
+                  onClick={(e) => { stop(e); setMenu(false); onMove(m.state, why || undefined); setWhy(""); }}
+                  className="px-2.5 py-1 rounded text-xs font-medium bg-white border hover:bg-stone-100"
+                  style={{ borderColor: BORDER, color: INK }}>
+                  {m.label}
                 </button>
               ))}
             </div>
