@@ -5,11 +5,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Send, Square, LogOut, Check, Trash2, Plus, ListTodo, Mail, Calendar,
-  FolderSearch, Users, Sparkles, RotateCcw, Globe,
+  FolderSearch, Users, Sparkles, RotateCcw, Globe, ThumbsUp, ThumbsDown,
+  SlidersHorizontal, ArrowLeft, Paperclip,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import * as api from "./api.js";
+import ChatRules from "./ChatRules.jsx";
 
 const INK = "#1C1C1C";
 const MIST = "#F3F0EC";
@@ -32,8 +34,17 @@ const TOOL_LABELS = {
   delete_todo: { icon: ListTodo, label: "Removing a to-do" },
   search_crm_contacts: { icon: Users, label: "Searching CRM contacts" },
   get_crm_contact: { icon: Users, label: "Reading a CRM contact" },
+  read_uploaded_file: { icon: Paperclip, label: "Reading an uploaded file" },
   web_search: { icon: Globe, label: "Searching the web" },
 };
+
+const FEEDBACK_CHIPS = [
+  { value: "wrong_tool", label: "Wrong tool" },
+  { value: "too_verbose", label: "Too verbose" },
+  { value: "outdated_info", label: "Outdated info" },
+  { value: "missed_files", label: "Missed my files" },
+  { value: "already_knew", label: "Already knew that" },
+];
 
 const SUGGESTIONS = [
   "Make a to-do list from my recent emails",
@@ -69,10 +80,14 @@ export default function StarbotChat() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [filter, setFilter] = useState("chat"); // chat | rules
   const [todos, setTodos] = useState([]);
   const [todoText, setTodoText] = useState("");
+  const [blobReady, setBlobReady] = useState(false);
+  const [uploadNote, setUploadNote] = useState("");
   const abortRef = useRef(null);
   const scrollRef = useRef(null);
+  const fileInputRef = useRef(null);
   // "Pinned" = the view is following the bottom of the conversation. It stays
   // true until the user scrolls up (to read earlier text mid-stream); scrolling
   // back to the bottom re-pins. Only a pinned view auto-scrolls, so a streaming
@@ -90,6 +105,23 @@ export default function StarbotChat() {
   useEffect(() => {
     if (me?.signedIn) refreshTodos();
   }, [me?.signedIn]);
+
+  useEffect(() => {
+    api.chatFilesStatus().then((s) => setBlobReady(s.configured)).catch(() => {});
+  }, []);
+
+  const handleFileAttach = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || busy) return;
+    try {
+      await api.uploadChatFile(file);
+      setUploadNote(`Attached: ${file.name}`);
+      setTimeout(() => setUploadNote(""), 4000);
+    } catch {
+      setError("File upload failed.");
+    }
+  };
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -278,6 +310,16 @@ export default function StarbotChat() {
             ★ Starbot · {me.name}
           </div>
           <div className="flex items-center gap-1">
+            <button onClick={() => setFilter(filter === "rules" ? "chat" : "rules")}
+              title={filter === "rules" ? "Back to chat" : "Preferences & rules"}
+              className="px-2.5 py-1.5 rounded text-xs font-medium flex items-center gap-1.5"
+              style={filter === "rules"
+                ? { background: INK, color: "white" }
+                : { background: "transparent", color: INK }}>
+              {filter === "rules"
+                ? <><ArrowLeft size={13} /> Return to chat</>
+                : <><SlidersHorizontal size={13} /> Rules</>}
+            </button>
             <button onClick={clearChat} title="New conversation" className="p-2.5 rounded hover:bg-stone-100" style={{ color: INK }}>
               <RotateCcw size={14} />
             </button>
@@ -287,6 +329,12 @@ export default function StarbotChat() {
           </div>
         </div>
 
+        {filter === "rules" ? (
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            <ChatRules />
+          </div>
+        ) : (
+        <>
         <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {chat.ui.length === 0 && (
             <div className="pt-8 text-center">
@@ -316,7 +364,7 @@ export default function StarbotChat() {
                 </div>
               </div>
             ) : (
-              <div key={i} className="flex justify-start">
+              <div key={i} className="flex justify-start group">
                 <div className="starbot-wrap max-w-[95%] min-w-0 text-[15px]">
                   {m.tools?.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mb-1.5">
@@ -351,6 +399,15 @@ export default function StarbotChat() {
                       </div>
                     )
                   )}
+                  {m.text && !(busy && i === chat.ui.length - 1) && (
+                    <FeedbackBar
+                      msgIndex={i}
+                      userText={i > 0 ? chat.ui[i - 1]?.text : ""}
+                      assistantText={m.text}
+                      tools={m.tools}
+                      chat={chat}
+                    />
+                  )}
                 </div>
               </div>
             )
@@ -363,7 +420,20 @@ export default function StarbotChat() {
           </div>
         )}
 
-        <div className="px-4 pb-3 pt-1 flex gap-2">
+        {uploadNote && (
+          <div className="mx-4 mb-1 rounded px-2.5 py-1.5 text-xs" style={{ background: "#e8f4ea", color: "#2b6a58" }}>
+            {uploadNote}
+          </div>
+        )}
+        <div className="px-4 pb-3 pt-1 flex items-end gap-2">
+          <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileAttach}
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.pptx,.csv,.txt,.md,.jpg,.jpeg,.png,.webp" />
+          <button onClick={() => fileInputRef.current?.click()} disabled={busy || !blobReady}
+            className="shrink-0 self-center rounded p-1.5 hover:bg-gray-100 disabled:cursor-not-allowed"
+            style={{ color: blobReady ? "#5f6e74" : "#aab3b5", opacity: blobReady ? 1 : 0.6 }}
+            title={blobReady ? "Attach a file for starbot to reference" : "File uploads not configured yet"}>
+            <Paperclip size={18} />
+          </button>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -379,15 +449,17 @@ export default function StarbotChat() {
             style={{ borderColor: "#cdd6d4" }}
           />
           {busy ? (
-            <button onClick={stop} title="Stop" className="px-3 rounded text-white" style={{ background: TIDE }}>
+            <button onClick={stop} title="Stop" className="self-center p-2 rounded text-white" style={{ background: TIDE }}>
               <Square size={16} />
             </button>
           ) : (
-            <button onClick={() => send()} title="Send" className="px-3 rounded text-white disabled:opacity-50" style={{ background: SEA }} disabled={!input.trim()}>
+            <button onClick={() => send()} title="Send" className="self-center p-2 rounded text-white disabled:opacity-50" style={{ background: SEA }} disabled={!input.trim()}>
               <Send size={16} />
             </button>
           )}
         </div>
+        </>
+        )}
       </section>
 
       {/* To-do rail */}
@@ -450,6 +522,84 @@ export default function StarbotChat() {
           )}
         </ul>
       </aside>
+    </div>
+  );
+}
+
+function FeedbackBar({ msgIndex, userText, assistantText, tools, chat }) {
+  const [state, setState] = useState("idle"); // idle | picking | sent
+  const [selectedChip, setSelectedChip] = useState(null);
+
+  const submit = async (rating, chip = null) => {
+    setState("sent");
+    const userPreview = (userText || "").slice(0, 300);
+    const assistantPreview = (assistantText || "").slice(0, 300);
+    try {
+      await api.submitChatFeedback({
+        rating,
+        chip,
+        correction: "",
+        user_message_preview: userPreview,
+        assistant_message_preview: assistantPreview,
+        tools_used: tools || [],
+      });
+    } catch { /* best effort */ }
+  };
+
+  if (state === "sent") {
+    return (
+      <div className="flex items-center gap-1.5 mt-1 ml-1">
+        <Check size={14} style={{ color: "#4a5359" }} />
+        <span className="text-[12px]" style={{ color: "#4a5359" }}>Thanks for the feedback</span>
+      </div>
+    );
+  }
+
+  if (state === "picking") {
+    return (
+      <div className="mt-1.5 ml-1">
+        <div className="text-[10px] mb-1" style={{ color: "#5f6e74" }}>What went wrong?</div>
+        <div className="flex flex-wrap gap-1">
+          {FEEDBACK_CHIPS.map((c) => (
+            <button
+              key={c.value}
+              onClick={() => { setSelectedChip(c.value); submit("down", c.value); }}
+              className="px-2 py-0.5 rounded-full text-[10px] font-medium hover:shadow-sm"
+              style={{ border: "1px solid #cdd6d4", color: INK, background: "white" }}
+            >
+              {c.label}
+            </button>
+          ))}
+          <button
+            onClick={() => submit("down", null)}
+            className="px-2 py-0.5 rounded-full text-[10px] font-medium hover:shadow-sm"
+            style={{ border: "1px solid #cdd6d4", color: "#5f6e74", background: "white" }}
+          >
+            Skip
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-0.5 mt-1 ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <button
+        onClick={() => submit("up")}
+        className="p-1 rounded hover:bg-stone-100"
+        title="Good response"
+        style={{ color: "#4a5359" }}
+      >
+        <ThumbsUp size={14} />
+      </button>
+      <button
+        onClick={() => setState("picking")}
+        className="p-1 rounded hover:bg-stone-100"
+        title="Bad response"
+        style={{ color: "#4a5359" }}
+      >
+        <ThumbsDown size={14} />
+      </button>
     </div>
   );
 }

@@ -25,6 +25,8 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 import accounts
+import admin
+import chat_feedback
 import digest
 import auth
 import cards
@@ -37,8 +39,9 @@ import projects
 import tasks
 import telemetry
 import triage_feedback
+import user_files
 from database import DATABASE_URL, Base, engine, get_db
-from models import Contact, Interaction, User
+from models import ChatFeedback, ChatPreference, ChatSuggestion, Contact, Interaction, SystemPromptSection, User
 from schemas import ChatIn, ContactIn, LogEditIn, LogIn, TodoIn, TodoPatch, UserIn
 
 
@@ -134,6 +137,25 @@ def _ensure_schema() -> None:
         conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_triage_sugg_user_pattern "
             "ON triage_suggestions (user_id, scope, pattern, action)"
+        ))
+        # Admin flag on users (2026-09-15). Additive; defaults to FALSE.
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+        # Set ethan as admin by email (idempotent).
+        conn.execute(text(
+            "UPDATE users SET is_admin = TRUE "
+            "WHERE email = 'ethan@starflooringandremodeling.com' AND is_admin = FALSE"
+        ))
+        # Chat feedback + per-user preferences (Phase 2, 2026-09-15).
+        # Tables are created by create_all above; indexes are additive.
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_chat_sugg_user_cat_text "
+            "ON chat_suggestions (user_id, category, text)"
+        ))
+        # User file uploads (Phase 3, 2026-09-15).
+        # Table created by create_all; index for the list-by-user query.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_user_files_user_uploaded "
+            "ON user_files (user_id, uploaded_at DESC)"
         ))
 
 
@@ -341,6 +363,112 @@ def _get_or_404(db: Session, user: User, contact_id: str) -> Contact:
     return contact
 
 
+def _seed_prompt_sections(db: Session) -> None:
+    """Seed the system prompt sections from the original hardcoded content.
+    Only runs when the table is empty (first boot after this feature lands)."""
+    if db.query(SystemPromptSection).first() is not None:
+        return
+
+    _SEED_SECTIONS = [
+        (
+            "identity",
+            "Identity",
+            (
+                "You are starbot, the internal AI assistant for Star Flooring & Remodeling "
+                "(San Diego flooring, remodeling, and flood-restoration company). You are "
+                "talking to {user_name} ({user_email}). Today is {weekday}, {today} "
+                "(Pacific time)."
+            ),
+            0,
+        ),
+        (
+            "capabilities",
+            "Capabilities",
+            (
+                "You can read the user's Outlook email and calendar, search company "
+                "SharePoint/OneDrive files, manage their starbot to-do list, and look up "
+                "their Star CRM contacts — those are all PRIVATE to this signed-in user. "
+                "You can also see the STAR MAIL ranking of this user's own inbox "
+                "(list_ranked_emails / get_email_thread) — that is the same triage the "
+                "Email tab shows, and it is the best way to answer 'what needs my reply' "
+                "without dumping the whole mailbox. You can also read and update two "
+                "SHARED team boards that everyone at Star sees: ACCOUNTS, the sales hit "
+                "list of about 120 property-management companies, and PROJECTS, the PM "
+                "team's large commercial construction jobs such as schools and restaurants. "
+                "You can also search the web for current or general information that isn't "
+                "in Star's own data."
+            ),
+            10,
+        ),
+        (
+            "rules",
+            "Rules",
+            (
+                "Rules:\n"
+                "- CITE SOURCES. When an answer draws on an email, event, or file, cite "
+                "it inline as a markdown link, e.g. [RE: 4620 walkthrough](webLink) — use "
+                "each item's webLink. Never invent a link or a fact you didn't read from a "
+                "tool result.\n"
+                "- WEB SEARCH: use it for external facts the user's M365 data can't "
+                "answer — current events, prices, product specs, codes/regulations, vendor "
+                "lookups, general reference. Cite web results inline as markdown links to "
+                "the source URL, same as any other source. Prefer the user's own "
+                "email/calendar/files/CRM for anything internal; reach for the web only "
+                "when the answer lives outside Star's data. Don't search for things you "
+                "already know confidently unless the user wants current or verified info.\n"
+                "- SHARED BOARDS ARE TEAM-VISIBLE, so treat writes carefully. Anything you "
+                "log or change on Accounts or Projects is seen and trusted by the whole "
+                "company, and there is no undo in chat. Search first, make sure you have "
+                "the RIGHT record when a name is ambiguous (ask if two could match), and "
+                "only write when the user clearly asked you to. Never invent a contact, a "
+                "date, or a job detail. You CANNOT create or delete accounts or projects "
+                "from chat by design — for those, point the user at the Accounts or "
+                "Projects tab.\n"
+                "- KEEP THE TWO BOARDS STRAIGHT. Accounts is SALES prospecting: "
+                "property-management companies, an assigned rep, unit and property counts, "
+                "a pipeline status. Projects is the PM team's CONSTRUCTION work: a job "
+                "name, the GC or owner as client, a stage, a project manager, target "
+                "completion. They are separate boards with no link between them, so a "
+                "school or restaurant job is a PROJECT, not an account. For either board, "
+                "use search_accounts or list_projects to get the overview, then "
+                "get_account or get_project for one record's full history — do not pull "
+                "every record to answer a narrow question.\n"
+                "- To-do requests (\"make a to-do list from my emails\"): call list_todos "
+                "first, then scan list_recent_emails (and the calendar when relevant), "
+                "propose clear action items with due dates when the email implies one, and "
+                "add them with add_todos including source + source_link, plus a priority "
+                "when urgency is clear. Skip anything already on the list; say so briefly. "
+                "Tasks live on the user's Tasks board (columns: To do / In progress / "
+                "Done) — use update_todo to move or re-prioritize them when asked.\n"
+                "- BE FRUGAL WITH FULL EMAIL READS. The preview from list/search results "
+                "is usually enough to triage or extract a to-do. Call read_email only when "
+                "the decision truly needs the body (e.g. drafting a reply, a specific "
+                "detail the user asked for), at most 2-3 per request, prioritized. Never "
+                "read every email in a list.\n"
+                "- Inbox triage (\"organize/triage my inbox\"): group into **Action "
+                "needed**, **Waiting / follow-up**, **FYI — no action**, and **Junk / can "
+                "ignore**, newest first, each item as '[subject](webLink) — sender, date: "
+                "one-line why'. Recommend, don't nag.\n"
+                "- Email drafting: when asked to draft a reply, read the thread first, "
+                "then write the draft in a fenced block ready to copy. Match a "
+                "professional, direct tone; sign as {user_first_name}. You cannot send "
+                "email — say the draft is ready to copy into Outlook.\n"
+                "- Be concise and skimmable: short paragraphs, bullets for lists, bold "
+                "for the load-bearing bits. No filler, no restating the question.\n"
+                "- If a tool errors with a sign-in problem, tell the user to sign in "
+                "again via the chat tab. If you lack a capability (sending mail, editing "
+                "files), say so plainly."
+            ),
+            20,
+        ),
+    ]
+    for key, label, content, order in _SEED_SECTIONS:
+        db.add(SystemPromptSection(
+            key=key, label=label, content=content, sort_order=order,
+        ))
+    db.commit()
+
+
 def _seed_on_first_run() -> None:
     """Seed company-wide, user-independent data on startup. Every real user
     profile now comes from M365 sign-in (auth.user_from_claims creates one on
@@ -353,6 +481,8 @@ def _seed_on_first_run() -> None:
         accounts.seed_accounts(db)
         # Triage glossary (email_triage) seeds itself the same way.
         email_triage.seed_glossary(db)
+        # System prompt sections seed from the original hardcoded content.
+        _seed_prompt_sections(db)
     finally:
         db.close()
 
@@ -436,6 +566,9 @@ app.include_router(email_triage.router)
 app.include_router(triage_feedback.router)
 app.include_router(digest.router)
 app.include_router(tasks.router)
+app.include_router(admin.router)
+app.include_router(chat_feedback.router)
+app.include_router(user_files.router)
 
 
 @app.post("/api/chat")

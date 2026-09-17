@@ -72,6 +72,7 @@ class User(Base):
     # Serialized MSAL token cache (delegated Graph refresh/access tokens) for
     # the starbot chat. Only populated after the user signs in with Microsoft.
     m365_token_cache = Column(Text, nullable=True)
+    is_admin = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, server_default=func.now())
 
     contacts = relationship(
@@ -679,3 +680,149 @@ class TriageSuggestion(Base):
     evidence_count = Column(Integer, nullable=False, default=0)
     status = Column(String, nullable=False, default="pending")  # pending|accepted|rejected
     created_at = Column(DateTime, server_default=func.now())
+
+
+def _chat_feedback_id() -> str:
+    return "cf" + uuid.uuid4().hex[:11]
+
+
+def _chat_pref_id() -> str:
+    return "cp" + uuid.uuid4().hex[:11]
+
+
+def _chat_suggestion_id() -> str:
+    return "cs" + uuid.uuid4().hex[:11]
+
+
+class ChatFeedback(Base):
+    """One thumbs-up or thumbs-down on a starbot assistant response.
+
+    Mirrors TriageFeedback's philosophy: the snapshot fields (tools_used_json,
+    user_message_preview, assistant_message_preview) are what make a correction
+    actionable later. Without them a pattern detector can only count, not
+    understand what went wrong.
+
+    `chip` is the optional one-tap reason on thumbs-down: wrong_tool,
+    too_verbose, outdated_info, missed_files, already_knew. One tap of effort,
+    roughly doubles what the suggester can infer.
+
+    Rows outlive conversations deliberately (no FK to any ephemeral chat state)."""
+
+    __tablename__ = "chat_feedback"
+
+    id = Column(String, primary_key=True, default=_chat_feedback_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    rating = Column(String, nullable=False)       # up | down
+    chip = Column(String, nullable=True)           # quick-tap reason (thumbs-down only)
+    correction = Column(Text, default="")          # optional free-text correction
+    user_message_preview = Column(String, default="")      # first ~200 chars of user turn
+    assistant_message_preview = Column(String, default="")  # first ~200 chars of answer
+    tools_used_json = Column(Text, default="[]")   # JSON list of tool names used in the turn
+    status = Column(String, nullable=False, default="open")  # open | ruled | dismissed
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class ChatPreference(Base):
+    """A per-user chat behavior preference injected into the system prompt.
+
+    These are the soft-rule equivalent for starbot chat: free-text guidance
+    lines the user writes (or accepts from a suggestion) that shape how the
+    model responds. Examples: "I prefer bullet points over paragraphs",
+    "Always check my calendar before suggesting meeting times",
+    "Don't summarize emails I've already read".
+
+    `category` groups them for the preferences UI (format, tool, knowledge,
+    general). The system prompt section lists all active preferences as bullet
+    points under a "Per-user preferences" heading."""
+
+    __tablename__ = "chat_preferences"
+
+    id = Column(String, primary_key=True, default=_chat_pref_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    text = Column(Text, nullable=False)
+    category = Column(String, nullable=False, default="general")  # format | tool | knowledge | general
+    source = Column(String, nullable=False, default="manual")     # manual | suggested
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class ChatSuggestion(Base):
+    """A preference the system proposes after N feedback entries share a pattern.
+
+    Never auto-applied. Same trust gate as TriageSuggestion: a suggestion the
+    user taps Add on feels like training; a preference that silently reshapes
+    their chat is how people stop trusting the tool.
+
+    `evidence_json` holds the feedback ids behind it so the card can show
+    concrete examples rather than assert a pattern on faith."""
+
+    __tablename__ = "chat_suggestions"
+
+    id = Column(String, primary_key=True, default=_chat_suggestion_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    text = Column(Text, nullable=False)
+    category = Column(String, nullable=False, default="general")
+    rationale = Column(String, default="")
+    evidence_json = Column(Text, default="[]")
+    evidence_count = Column(Integer, nullable=False, default=0)
+    status = Column(String, nullable=False, default="pending")  # pending | accepted | rejected
+    created_at = Column(DateTime, server_default=func.now())
+
+
+def _user_file_id() -> str:
+    return "uf" + uuid.uuid4().hex[:12]
+
+
+class UserFile(Base):
+    """A file uploaded by a user as context for AI conversations.
+
+    File content lives in Azure Blob Storage; this row holds metadata plus
+    an AI-generated summary that rides into the system prompt. Privacy model:
+    everyone sees the metadata (name, uploader, date) but only the owner's
+    chat can fetch actual content."""
+
+    __tablename__ = "user_files"
+
+    id = Column(String, primary_key=True, default=_user_file_id)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    filename = Column(String, nullable=False)
+    content_type = Column(String, nullable=False, default="application/octet-stream")
+    size_bytes = Column(Integer, nullable=False, default=0)
+    blob_key = Column(String, nullable=False)
+    summary = Column(Text, nullable=False, default="")
+    uploaded_at = Column(DateTime, server_default=func.now())
+
+    owner = relationship("User", backref="files")
+
+
+def _prompt_section_id() -> str:
+    return "ps" + uuid.uuid4().hex[:11]
+
+
+class SystemPromptSection(Base):
+    """One section of the company-wide starbot system prompt. Assembled in
+    sort_order into the Claude API `system` parameter at chat time.
+
+    Admin-only editable. Supports {user_name}, {user_first_name},
+    {user_email}, {weekday}, {today} placeholders that are substituted at
+    runtime so the company prompt can reference the current user without
+    being per-user."""
+
+    __tablename__ = "system_prompt_sections"
+
+    id = Column(String, primary_key=True, default=_prompt_section_id)
+    key = Column(String, nullable=False, unique=True)
+    label = Column(String, nullable=False, default="")
+    content = Column(Text, nullable=False, default="")
+    sort_order = Column(Integer, nullable=False, default=0)
+    active = Column(Boolean, nullable=False, default=True)
+    updated_at = Column(DateTime, server_default=func.now())
+    updated_by = Column(String, default="")

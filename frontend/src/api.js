@@ -247,6 +247,70 @@ export const chatStream = async (messages, onEvent, signal) => {
   }
 };
 
+// --- Chat feedback + preferences (session-cookie auth) -----------------------
+
+export const getChatSystemPrompt = () => sessionRequest("/api/chat/system-prompt");
+
+export const submitChatFeedback = (data) =>
+  sessionRequest("/api/chat/feedback", { method: "POST", body: JSON.stringify(data) });
+
+export const listChatFeedback = () => sessionRequest("/api/chat/feedback");
+
+export const listChatPreferences = () => sessionRequest("/api/chat/preferences");
+
+export const createChatPreference = (data) =>
+  sessionRequest("/api/chat/preferences", { method: "POST", body: JSON.stringify(data) });
+
+export const updateChatPreference = (id, data) =>
+  sessionRequest(`/api/chat/preferences/${id}`, { method: "PUT", body: JSON.stringify(data) });
+
+export const deleteChatPreference = (id) =>
+  sessionRequest(`/api/chat/preferences/${id}`, { method: "DELETE" });
+
+// --- Chat file uploads (session-cookie auth, multipart) ----------------------
+
+export const listChatFiles = () => sessionRequest("/api/chat/files");
+
+export const chatFilesStatus = () => sessionRequest("/api/chat/files/status");
+
+export const uploadChatFile = async (file, timeoutMs = 60000) => {
+  const fd = new FormData();
+  fd.append("file", file, file.name || "file");
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${BASE}/api/chat/files`, {
+      method: "POST",
+      credentials: "include",
+      body: fd,
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      let detail = "";
+      try { detail = (await res.json())?.detail || ""; } catch { /* ignore */ }
+      const err = new Error(detail || `API ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return await res.json();
+  } catch (e) {
+    if (e.name === "AbortError") {
+      const err = new Error("Upload timed out");
+      err.status = 0;
+      throw err;
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+export const getChatFileDownload = (id) =>
+  sessionRequest(`/api/chat/files/${id}/download`);
+
+export const deleteChatFile = (id) =>
+  sessionRequest(`/api/chat/files/${id}`, { method: "DELETE" });
+
 // --- Projects (shared PM board — company-wide, session-cookie auth) ----------
 export const listProjects = () => sessionRequest("/api/projects");
 export const createProject = (data) =>

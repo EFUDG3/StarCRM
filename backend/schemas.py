@@ -252,3 +252,55 @@ class TriageProfileIn(BaseModel):
     have switched on. `companyRules` is the full desired list, not a delta."""
     profile: Optional[str] = Field(default=None, max_length=2000)
     companyRules: Optional[list[str]] = None
+
+
+# --- Chat feedback + preferences ----------------------------------------------
+
+_FEEDBACK_CHIPS = {"wrong_tool", "too_verbose", "outdated_info", "missed_files", "already_knew"}
+_PREF_CATEGORIES = {"format", "tool", "knowledge", "general"}
+
+
+class ChatFeedbackIn(BaseModel):
+    """Thumbs up/down on an assistant response."""
+    rating: str = Field(pattern="^(up|down)$")
+    chip: Optional[str] = Field(default=None, max_length=30)
+    correction: str = Field(default="", max_length=1000)
+    user_message_preview: str = Field(default="", max_length=300)
+    assistant_message_preview: str = Field(default="", max_length=300)
+    tools_used: list[str] = Field(default_factory=list)
+
+    @field_validator("chip")
+    @classmethod
+    def _valid_chip(cls, v: str | None) -> str | None:
+        if v is not None and v not in _FEEDBACK_CHIPS:
+            return None
+        return v
+
+
+class ChatPreferenceIn(BaseModel):
+    """Create or update a per-user chat preference."""
+    text: str = Field(max_length=500)
+    category: str = Field(default="general", max_length=30)
+    active: Optional[bool] = None
+
+    @field_validator("category")
+    @classmethod
+    def _valid_category(cls, v: str) -> str:
+        v = (v or "general").strip().lower()
+        return v if v in _PREF_CATEGORIES else "general"
+
+
+# --- Admin: system prompt + glossary -----------------------------------------
+
+class PromptSectionIn(BaseModel):
+    """Update one section of the company-wide system prompt."""
+    content: Optional[str] = Field(default=None, max_length=10000)
+    label: Optional[str] = Field(default=None, max_length=200)
+    sort_order: Optional[int] = None
+    active: Optional[bool] = None
+
+
+class GlossaryIn(BaseModel):
+    """One company glossary entry (term + meaning)."""
+    term: str = Field(max_length=200)
+    meaning: str = Field(max_length=1000)
