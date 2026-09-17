@@ -25,3 +25,11 @@ httpx==0.28.1
 # Mileage report export: fills the vendored HR-format template
 # (assets/mileage_report_template.xlsx) with logged trips.
 openpyxl==3.1.5
+# Azure Blob Storage: file uploads for chat context (Phase 3) and
+# product catalog images (future). SAS URL pattern = direct browser
+# upload/download, bytes never stream through the container.
+azure-storage-blob==12.25.1
+# Text extraction from uploaded files (chat tool: read_uploaded_file).
+PyPDF2==3.0.1
+python-docx==1.1.2
+python-pptx==1.0.2

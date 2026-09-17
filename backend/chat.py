@@ -17,13 +17,15 @@ import anthropic
 from sqlalchemy.orm import Session
 
 import accounts
+import blob
 import email_triage
+import file_reader
 import graph
 import mcp_server
 import projects
 import telemetry
 from database import SessionLocal
-from models import Todo, User
+from models import ChatPreference, GlossaryEntry, SystemPromptSection, Todo, User, UserFile
 
 CHAT_MODEL = os.getenv("CHAT_MODEL", "claude-sonnet-4-6")
 MAX_TOOL_ROUNDS = 10
@@ -480,6 +482,21 @@ TOOLS = [
             "required": ["thread_id"],
         },
     },
+    {
+        "name": "read_uploaded_file",
+        "description": (
+            "Read the text content of a file the user (or a teammate) uploaded to this chat. "
+            "Use the file_id from the uploaded-files list in your instructions. "
+            "Returns extracted text for documents/spreadsheets/PDFs, or an error for images."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_id": {**_STR, "description": "The file ID from the uploaded-files list"},
+            },
+            "required": ["file_id"],
+        },
+    },
 ]
 
 # Anthropic server-side web search: Claude issues the query, Anthropic runs it
@@ -491,63 +508,122 @@ WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_use
 _API_TOOLS = [*TOOLS, WEB_SEARCH_TOOL]
 
 
-def _system_prompt(user: User) -> str:
+def _system_prompt(user: User, db: Session) -> str:
+    """Assemble the system prompt from DB-backed sections + glossary.
+
+    The Claude API `system` parameter is "who you are and how to behave."
+    It contains:
+      1. Company prompt sections (admin-editable, from system_prompt_sections)
+      2. Dynamic per-request context (user name, date - injected via placeholders)
+      3. Glossary (admin-editable, from glossary table)
+      4. Per-user preferences (from chat_preferences table)
+
+    Sections support these runtime placeholders:
+      {user_name}        Full name of the signed-in user
+      {user_first_name}  First name (for email sign-offs)
+      {user_email}       Email address
+      {weekday}          e.g. "Monday"
+      {today}            ISO date e.g. "2026-09-15"
+    """
     today = date_cls.today().isoformat()
     weekday = date_cls.today().strftime("%A")
-    return f"""You are starbot, the internal AI assistant for Star Flooring & Remodeling \
+    first_name = user.name.split()[0] if user.name else "the user"
+
+    subs = {
+        "user_name": user.name or "Unknown",
+        "user_first_name": first_name,
+        "user_email": user.email or "email unknown",
+        "weekday": weekday,
+        "today": today,
+    }
+
+    sections = (
+        db.query(SystemPromptSection)
+        .filter(SystemPromptSection.active.is_(True))
+        .order_by(SystemPromptSection.sort_order)
+        .all()
+    )
+
+    if not sections:
+        return _FALLBACK_SYSTEM_PROMPT.format_map(subs)
+
+    parts = []
+    for s in sections:
+        try:
+            parts.append(s.content.format_map(subs))
+        except KeyError:
+            parts.append(s.content)
+
+    glossary = db.query(GlossaryEntry).order_by(GlossaryEntry.term).all()
+    if glossary:
+        lines = [f"- {g.term}: {g.meaning}" for g in glossary]
+        parts.append("Company glossary (use these when interpreting user questions "
+                      "and tool results):\n" + "\n".join(lines))
+
+    prefs = (
+        db.query(ChatPreference)
+        .filter(ChatPreference.user_id == user.id, ChatPreference.active.is_(True))
+        .order_by(ChatPreference.created_at)
+        .all()
+    )
+    if prefs:
+        pref_lines = [f"- {p.text}" for p in prefs]
+        parts.append(
+            f"Per-user preferences for {first_name} (follow these when responding):\n"
+            + "\n".join(pref_lines)
+        )
+
+    own_files = (
+        db.query(UserFile)
+        .filter(UserFile.user_id == user.id)
+        .order_by(UserFile.uploaded_at.desc())
+        .all()
+    )
+    if own_files:
+        file_lines = []
+        for f in own_files:
+            date_str = f.uploaded_at.strftime("%Y-%m-%d") if f.uploaded_at else "unknown date"
+            file_lines.append(f"- {f.filename} [file_id: {f.id}] (uploaded {date_str}) - {f.summary}")
+        parts.append(
+            f"Files uploaded by {first_name}. To read a file's content, call the "
+            f"read_uploaded_file tool with the file_id shown in brackets:\n"
+            + "\n".join(file_lines)
+        )
+
+    other_files = (
+        db.query(UserFile, User)
+        .join(User, UserFile.user_id == User.id)
+        .filter(UserFile.user_id != user.id)
+        .order_by(UserFile.uploaded_at.desc())
+        .limit(50)
+        .all()
+    )
+    if other_files:
+        other_lines = []
+        for f, owner in other_files:
+            date_str = f.uploaded_at.strftime("%Y-%m-%d") if f.uploaded_at else "unknown date"
+            owner_name = owner.name.split()[0] if owner.name else "someone"
+            other_lines.append(f"- {f.filename} (uploaded by {owner_name} on {date_str})")
+        parts.append(
+            "Files uploaded by other team members (metadata only; you cannot access their content):\n"
+            + "\n".join(other_lines)
+        )
+
+    return "\n\n".join(parts)
+
+
+_FALLBACK_SYSTEM_PROMPT = """\
+You are starbot, the internal AI assistant for Star Flooring & Remodeling \
 (San Diego flooring, remodeling, and flood-restoration company). You are talking to \
-{user.name} ({user.email or "email unknown"}). Today is {weekday}, {today} (Pacific time).
+{user_name} ({user_email}). Today is {weekday}, {today} (Pacific time).
 
 You can read the user's Outlook email and calendar, search company SharePoint/OneDrive \
-files, manage their starbot to-do list, and look up their Star CRM contacts — those are all \
-PRIVATE to this signed-in user. You can also see the STAR MAIL ranking of this user's own \
-inbox (list_ranked_emails / get_email_thread) — that is the same triage the Email tab shows, \
-and it is the best way to answer 'what needs my reply' without dumping the whole mailbox. \
-You can also read and update two SHARED team boards that everyone at Star sees: ACCOUNTS, \
-the sales hit list of about 120 property-management companies, and PROJECTS, the PM team's \
-large commercial construction jobs such as schools and restaurants. You can also search the \
-web for current or general information that isn't in Star's own data.
+files, manage their starbot to-do list, and look up their Star CRM contacts. You can also \
+search the web for current or general information.
 
 Rules:
 - CITE SOURCES. When an answer draws on an email, event, or file, cite it inline as a \
-markdown link, e.g. [RE: 4620 walkthrough](webLink) — use each item's webLink. Never \
-invent a link or a fact you didn't read from a tool result.
-- WEB SEARCH: use it for external facts the user's M365 data can't answer — current events, \
-prices, product specs, codes/regulations, vendor lookups, general reference. Cite web \
-results inline as markdown links to the source URL, same as any other source. Prefer the \
-user's own email/calendar/files/CRM for anything internal; reach for the web only when the \
-answer lives outside Star's data. Don't search for things you already know confidently \
-unless the user wants current or verified info.
-- SHARED BOARDS ARE TEAM-VISIBLE, so treat writes carefully. Anything you log or change \
-on Accounts or Projects is seen and trusted by the whole company, and there is no undo in \
-chat. Search first, make sure you have the RIGHT record when a name is ambiguous (ask if \
-two could match), and only write when the user clearly asked you to. Never invent a \
-contact, a date, or a job detail. You CANNOT create or delete accounts or projects from \
-chat by design — for those, point the user at the Accounts or Projects tab.
-- KEEP THE TWO BOARDS STRAIGHT. Accounts is SALES prospecting: property-management \
-companies, an assigned rep, unit and property counts, a pipeline status. Projects is the PM \
-team's CONSTRUCTION work: a job name, the GC or owner as client, a stage, a project \
-manager, target completion. They are separate boards with no link between them, so a school \
-or restaurant job is a PROJECT, not an account. For either board, use search_accounts or \
-list_projects to get the overview, then get_account or get_project for one record's full \
-history — do not pull every record to answer a narrow question.
-- To-do requests ("make a to-do list from my emails"): call list_todos first, then scan \
-list_recent_emails (and the calendar when relevant), propose clear action items with due \
-dates when the email implies one, and add them with add_todos including source + \
-source_link, plus a priority when urgency is clear. Skip anything already on the list; \
-say so briefly. Tasks live on the user's Tasks board (columns: To do / In progress / \
-Done) — use update_todo to move or re-prioritize them when asked.
-- BE FRUGAL WITH FULL EMAIL READS. The preview from list/search results is usually enough \
-to triage or extract a to-do. Call read_email only when the decision truly needs the body \
-(e.g. drafting a reply, a specific detail the user asked for), at most 2-3 per request, \
-prioritized. Never read every email in a list.
-- Inbox triage ("organize/triage my inbox"): group into **Action needed**, **Waiting / \
-follow-up**, **FYI — no action**, and **Junk / can ignore**, newest first, each item as \
-'[subject](webLink) — sender, date: one-line why'. Recommend, don't nag.
-- Email drafting: when asked to draft a reply, read the thread first, then write the \
-draft in a fenced block ready to copy. Match a professional, direct tone; sign as \
-{user.name.split()[0] if user.name else "the user"}. You cannot send email — say the \
-draft is ready to copy into Outlook.
+markdown link using each item's webLink. Never invent a link or a fact.
 - Be concise and skimmable: short paragraphs, bullets for lists, bold for the load-bearing \
 bits. No filler, no restating the question.
 - If a tool errors with a sign-in problem, tell the user to sign in again via the chat \
@@ -625,7 +701,18 @@ def _run_tool(name: str, args: dict, user: User, db: Session, token: str):
         )
     if name == "get_email_thread":
         return email_triage.op_get_email_thread(db, user, args["thread_id"])
+    if name == "read_uploaded_file":
+        return _read_uploaded_file(db, user, args["file_id"])
     raise ValueError(f"Unknown tool: {name}")
+
+
+def _read_uploaded_file(db: Session, user: User, file_id: str):
+    uf = db.query(UserFile).filter(UserFile.id == file_id).first()
+    if uf is None:
+        return {"error": f"No file found with id '{file_id}'."}
+    data = blob.download_file(uf.blob_key)
+    text = file_reader.extract_text(data, uf.content_type, uf.filename)
+    return {"filename": uf.filename, "content": text}
 
 
 # --- The SSE agent loop ------------------------------------------------------
@@ -707,7 +794,7 @@ def stream_chat(messages: list[dict], user_id: str, graph_token: str):
         # cached prefix over the conversation as it grows.
         system = [{
             "type": "text",
-            "text": _system_prompt(user),
+            "text": _system_prompt(user, db),
             "cache_control": {"type": "ephemeral"},
         }]
         messages[:] = _trim_history(messages)
